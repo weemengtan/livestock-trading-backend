@@ -15,6 +15,20 @@ from decimal import Decimal
 from pydantic import BaseModel
 
 
+class SpeciesOption(BaseModel):
+    """The open species_registry (models/reference_data.py::SpeciesRegistry),
+    trimmed to what a buyer needs to populate a picker — deliberately none
+    of SpeciesResponse's (schemas/reference_data.py) pricing-prerequisite
+    fields (has_dnbp_factor/has_standard_weight), which are a trading-console
+    onboarding concern, not buyer-facing data. Independent of DNBP: a
+    species can be listed here whether or not anything has been published
+    for it today (see lib/buyer/use-species.ts's module docstring for why
+    Market Intel deliberately doesn't route through dnbp_cache)."""
+
+    code: str
+    display_name: str
+
+
 class WeightBand(BaseModel):
     min: str
     max: str

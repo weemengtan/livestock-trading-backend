@@ -22,6 +22,7 @@ from repositories import buy_entries as buy_entries_repo
 from repositories import buy_instructions as buy_instructions_repo
 from repositories import publications as publications_repo
 from repositories import push_subscriptions as push_subscriptions_repo
+from repositories import registries as registries_repo
 from schemas.buyer import (
     AckRequest,
     BulkSyncItemResult,
@@ -34,6 +35,7 @@ from schemas.buyer import (
     InstructionResponse,
     PushSubscriptionRequest,
     ScorecardResponse,
+    SpeciesOption,
 )
 from services import buy_entry_service, buy_instruction_service, delivery_service, scorecard_service
 from services.buy_entry_service import BuyEntryInput
@@ -88,6 +90,17 @@ def _to_entry_response(entry, *, is_possible_duplicate: bool = False) -> BuyEntr
         synced_at=entry.synced_at,
         is_possible_duplicate=is_possible_duplicate,
     )
+
+
+@router.get("/species", response_model=list[SpeciesOption])
+async def list_species(current: CurrentUser = Depends(_buyer_only), db: AsyncSession = Depends(get_db)) -> list[SpeciesOption]:
+    """Market Intel's species picker (§ — office market-intelligence
+    capture, no business transaction involved) reads the open registry
+    directly, never DNBP's published species — a buyer logging a
+    competitor's bid has nothing to do with today's own DNBP publication,
+    and must work even on a species nothing has been published for."""
+    rows = await registries_repo.list_species(db)
+    return [SpeciesOption(code=row.code, display_name=row.display_name) for row in rows if row.is_active]
 
 
 @router.get("/dnbp/current", response_model=DnbpCurrentResponse)
