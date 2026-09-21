@@ -24,7 +24,6 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "hypothesis>=6.130.0",
     "ruff>=0.16.6",
 ]
 
