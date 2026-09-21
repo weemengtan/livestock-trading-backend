@@ -23,7 +23,7 @@ class AuditLog(Base):
     __tablename__ = "audit_log"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), unique=True)
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), index=True, unique=True)
     actor_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), default=None)
     action: Mapped[str] = mapped_column(String, index=True)
     entity: Mapped[str] = mapped_column(String, index=True)
