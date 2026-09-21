@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ReferenceDataEntryInput(BaseModel):
@@ -18,11 +18,26 @@ class ReferenceDataEntryInput(BaseModel):
     text_value: str | None = None
 
 
+class ReferenceDataKeyRef(BaseModel):
+    """Identifies one keyed entry to remove from the new version."""
+
+    table_key: str
+    key1: str | None = None
+    key2: str | None = None
+
+
 class CreateVersionRequest(BaseModel):
     effective_from: datetime
     note: str | None = None
     model_type: str | None = None  # omitted = keep the active version's model
-    entries: list[ReferenceDataEntryInput] = Field(min_length=1)
+    entries: list[ReferenceDataEntryInput] = Field(default_factory=list)
+    removals: list[ReferenceDataKeyRef] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _needs_a_change(self) -> "CreateVersionRequest":
+        if not self.entries and not self.removals and self.model_type is None:
+            raise ValueError("A version needs at least one entry, removal or model change.")
+        return self
 
 
 class ReferenceDataEntryResponse(BaseModel):
@@ -94,6 +109,7 @@ class ImpactPreviewResponse(BaseModel):
     lines: list[ImpactLineResponse]
     aggregate_exposure_delta_aud: Decimal
     lines_affected: int
+    lines_unpriced: int
 
 
 class SpeciesResponse(BaseModel):

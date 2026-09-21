@@ -55,6 +55,16 @@ _WRITABLE_TABLE_KEYS = {
 SOURCE_OF_TRUTH_TABLE_KEYS = {ReferenceDataTableKey.CIF_BUFFER_PER_KG, ReferenceDataTableKey.DNBP_FACTOR}
 
 
+# Keyed tables where dropping one row is meaningful (a species no longer
+# priced, a saleyard no longer traded). Single values (CIF buffer, the
+# operational constants) are required and can only be changed.
+REMOVABLE_TABLE_KEYS = {
+    ReferenceDataTableKey.DNBP_FACTOR,
+    ReferenceDataTableKey.STANDARD_WEIGHT,
+    ReferenceDataTableKey.SALEYARD_CALENDAR,
+}
+
+
 def resolve_table_key(raw_table_key: str) -> ReferenceDataTableKey:
     if raw_table_key in _ABATTOIR_TABLE_KEYS:
         raise AbattoirOwnedTable(raw_table_key)
@@ -119,6 +129,7 @@ async def create_version(
     note: str | None,
     raw_entries: list[tuple[str, str | None, str | None, Decimal, str | None]],
     model_type: str | None = None,
+    removals: list[tuple[str, str | None, str | None]] | None = None,
 ) -> ReferenceDataVersion:
     """Every version is a COMPLETE, standalone snapshot of the Everhealth
     config — same philosophy as order_snapshots being a full cumulative
@@ -150,6 +161,23 @@ async def create_version(
         validate_entry(table_key, key1, key2, value)
         merged[(table_key, key1, key2)] = (value, text_value)
 
+    removed: list[tuple[ReferenceDataTableKey, str | None, str | None]] = []
+    for raw_table_key, key1, key2 in removals or []:
+        table_key = resolve_table_key(raw_table_key)
+        if table_key not in REMOVABLE_TABLE_KEYS:
+            raise _invalid(
+                f"{table_key.value} is a required single value and cannot be removed — change it instead."
+            )
+        target = (table_key, key1, key2)
+        if any(r_key == target for r_key in [(resolve_table_key(e[0]), e[1], e[2]) for e in raw_entries]):
+            raise _invalid("The same entry cannot be both changed and removed in one version.")
+        if target not in merged:
+            raise _invalid(
+                f"Nothing to remove: {table_key.value} {key1 or ''} {key2 or ''} is not in the active version."
+            )
+        del merged[target]
+        removed.append(target)
+
     resolved_entries = [
         (table_key, key1, key2, value, text_value) for (table_key, key1, key2), (value, text_value) in merged.items()
     ]
@@ -172,6 +200,7 @@ async def create_version(
         after={"effective_from": effective_from.isoformat(), "note": note,
             "model_type": resolved_model_type,
             "entry_count": len(resolved_entries),
+            "removed": [{"table_key": t.value, "key1": k1, "key2": k2} for t, k1, k2 in removed],
         },
     )
     return version

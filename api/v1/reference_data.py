@@ -86,6 +86,7 @@ async def create_version(
         note=body.note,
         raw_entries=[(e.table_key, e.key1, e.key2, e.value, e.text_value) for e in body.entries],
         model_type=body.model_type,
+        removals=[(r.table_key, r.key1, r.key2) for r in body.removals],
     )
     await db.commit()
     return version
@@ -103,6 +104,7 @@ async def preview_impact(
         lines=[ImpactLineResponse(**dataclasses.asdict(line)) for line in preview.lines],
         aggregate_exposure_delta_aud=preview.aggregate_exposure_delta_aud,
         lines_affected=preview.lines_affected,
+        lines_unpriced=preview.lines_unpriced,
     )
 
 

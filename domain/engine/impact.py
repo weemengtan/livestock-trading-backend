@@ -56,7 +56,8 @@ class ImpactLineResult:
 class ImpactPreview:
     lines: list[ImpactLineResult]
     aggregate_exposure_delta_aud: Decimal
-    lines_affected: int  # lines whose dnbp actually changes (old != new)
+    lines_affected: int  # lines whose dnbp changes (old != new), including lines that lose their price
+    lines_unpriced: int = 0  # lines that had a price and would have none (e.g. a removed species factor)
 
 
 def _price_or_none(avg_price_aud: Decimal | None, species: str, config: EverhealthConfig) -> Decimal | None:
@@ -77,6 +78,7 @@ def compute_impact(
     results: list[ImpactLineResult] = []
     aggregate = Decimal(0)
     affected = 0
+    unpriced = 0
 
     for line in lines:
         old_dnbp = _price_or_none(line.avg_price_aud, line.species, old_config)
@@ -91,6 +93,9 @@ def compute_impact(
                 aggregate += exposure_delta
             if delta_per_kg != 0:
                 affected += 1
+        elif old_dnbp is not None and new_dnbp is None:
+            affected += 1
+            unpriced += 1
 
         results.append(
             ImpactLineResult(
@@ -104,4 +109,9 @@ def compute_impact(
             )
         )
 
-    return ImpactPreview(lines=results, aggregate_exposure_delta_aud=aggregate, lines_affected=affected)
+    return ImpactPreview(
+        lines=results,
+        aggregate_exposure_delta_aud=aggregate,
+        lines_affected=affected,
+        lines_unpriced=unpriced,
+    )
