@@ -13,7 +13,6 @@ class OrderLineResponse(BaseModel):
     id: uuid.UUID
     snapshot_id: uuid.UUID
     line_no: int
-    lifecycle: str
     contract_no: str | None
     customer_name: str | None
     species: str | None

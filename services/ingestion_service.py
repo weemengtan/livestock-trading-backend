@@ -23,7 +23,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import settings
 from core.errors import IngestionRejected, PreviewExpired
-from domain.engine.workings import Lifecycle
 from domain.ingestion import diff as diff_module
 from domain.ingestion.errors import IngestionContractError
 from domain.ingestion.layout import DetectedLayout
@@ -57,7 +56,6 @@ def _str_to_decimal(value: str | None) -> Decimal | None:
 def _serialize_line(line: ParsedOrderLine) -> dict:
     return {
         "line_no": line.line_no,
-        "lifecycle": line.lifecycle.value,
         "source_sheet": line.source_sheet,
         "source_row": line.source_row,
         "contract_no": line.contract_no,
@@ -89,7 +87,6 @@ def _serialize_line(line: ParsedOrderLine) -> dict:
 def _deserialize_line(data: dict) -> ParsedOrderLine:
     return ParsedOrderLine(
         line_no=data["line_no"],
-        lifecycle=Lifecycle(data["lifecycle"]),
         source_sheet=data["source_sheet"],
         source_row=data["source_row"],
         contract_no=data["contract_no"],
@@ -143,7 +140,6 @@ def parsed_line_from_db(order_line: OrderLine) -> ParsedOrderLine:
     irrelevant to that comparison."""
     return ParsedOrderLine(
         line_no=order_line.line_no,
-        lifecycle=order_line.lifecycle,
         source_sheet="",
         source_row=0,
         contract_no=order_line.contract_no,
@@ -181,7 +177,6 @@ def _order_line_model(snapshot_id: uuid.UUID, line: ParsedOrderLine) -> OrderLin
     return OrderLine(
         snapshot_id=snapshot_id,
         line_no=line.line_no,
-        lifecycle=line.lifecycle,
         contract_no=line.contract_no,
         customer_name=line.customer_name,
         species=line.species,
@@ -210,7 +205,7 @@ def _order_line_model(snapshot_id: uuid.UUID, line: ParsedOrderLine) -> OrderLin
 
 def diff_to_jsonable(snapshot_diff: diff_module.SnapshotDiff) -> dict:
     def _line(line: ParsedOrderLine) -> dict:
-        return {"contract_no": line.contract_no, "species": line.species, "lifecycle": line.lifecycle.value}
+        return {"contract_no": line.contract_no, "species": line.species}
 
     def _field_change(change: diff_module.FieldChange) -> dict:
         def _value(v: object) -> object:

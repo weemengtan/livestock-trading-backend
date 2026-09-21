@@ -20,7 +20,7 @@ from core.reference_data import get_active_everhealth_config
 from domain.engine import crosscheck
 from domain.engine import issues as codes
 from domain.engine.issues import Severity, ValidationIssue, check_dnbp_outlier
-from domain.engine.workings import Lifecycle, OrderLineInput, compute_order_workings
+from domain.engine.workings import OrderLineInput, compute_order_workings
 from models.enums import CorrectionStatus
 from models.order_line import OrderLine
 from models.order_snapshot import OrderSnapshot
@@ -41,7 +41,6 @@ ENGINE_VERSION = "BingMultiplierV1"  # §5.6 — the one shipped, publishable en
 def _line_input(order_line: OrderLine) -> OrderLineInput:
     return OrderLineInput(
         species=order_line.species,
-        lifecycle=order_line.lifecycle,
         contract_no=order_line.contract_no,
         avg_price_aud=order_line.avg_price_aud,
         incoterm=order_line.incoterm.value if order_line.incoterm else None,
@@ -52,15 +51,12 @@ def _line_input(order_line: OrderLine) -> OrderLineInput:
         avg_weight_kg=order_line.avg_weight_kg,
         mom_ph=order_line.mom_ph,
         dnbp_benchmark=order_line.dnbp_benchmark,
-        loadout_date=order_line.loadout_date.isoformat() if order_line.loadout_date else None,
     )
 
 
 def _run_crosscheck(order_line: OrderLine) -> list[ValidationIssue]:
-    """§5.2 — only ever runs for ACTIVE lines (the caller enforces this);
-    RECEIVED_VALUE_MISMATCH is an ACTIVE-only code (domain/engine/issues.py
-    ACTIVE_ONLY_CODES) since it protects nothing on a line whose livestock
-    was already bought."""
+    """§5.2 — row-internal recomputation of the abattoir's own formulas;
+    a mismatch is a RECEIVED_VALUE_MISMATCH correction."""
     issues: list[ValidationIssue] = []
 
     if None not in (
@@ -148,13 +144,9 @@ async def calculate_snapshot(db: AsyncSession, snapshot: OrderSnapshot, *, actor
     for order_line in lines:
         workings, engine_issues = compute_order_workings(_line_input(order_line), config)
 
-        crosscheck_issues: list[ValidationIssue] = []
-        hand_set_issues: list[ValidationIssue] = []
-        outlier_issues: list[ValidationIssue] = []
-        if order_line.lifecycle is Lifecycle.ACTIVE:
-            crosscheck_issues = _run_crosscheck(order_line)
-            hand_set_issues = _hand_set_issues(order_line)
-            outlier_issues = await _check_dnbp_outlier(db, snapshot, workings, order_line.species)
+        crosscheck_issues = _run_crosscheck(order_line)
+        hand_set_issues = _hand_set_issues(order_line)
+        outlier_issues = await _check_dnbp_outlier(db, snapshot, workings, order_line.species)
 
         all_issues = [*engine_issues, *crosscheck_issues, *hand_set_issues, *outlier_issues]
 

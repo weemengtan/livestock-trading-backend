@@ -13,12 +13,8 @@ MONEY = Numeric(18, 10)
 
 class OrderWorkings(TimestampedBase):
     """§8 — EVERHEALTH-OWNED, Columns X-AF. Derived only: recomputed freely
-    by re-running POST /snapshots/{id}/calculate, never hand-edited. Exists
-    ONLY for an ACTIVE order_line (§5.3) — enforced at the database level by
-    a partial unique index plus a trigger checking the parent line's
-    lifecycle (see the phase2_ingestion_tables migration), not merely
-    because domain.engine.workings.compute_order_workings returns None for
-    a LOADED line.
+    by re-running POST /snapshots/{id}/calculate, never hand-edited. One row
+    per order line (unique index); every line is an Active Order.
 
     `bing_dnbp_inputs` persists exactly what produced `bing_dnbp` (G,
     species, cif_buffer, factor) so any published price is re-derivable

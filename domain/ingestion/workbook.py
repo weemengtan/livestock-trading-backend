@@ -18,7 +18,6 @@ from zipfile import BadZipFile
 import openpyxl
 from openpyxl.utils.exceptions import InvalidFileException
 
-from domain.engine.workings import Lifecycle
 from domain.ingestion import cells
 from domain.ingestion.benchmark import classify_benchmark_header
 from domain.ingestion.contract import IngestionContract
@@ -70,7 +69,6 @@ _DATE_FIELDS = frozenset({"loadout_date"})
 @dataclass(frozen=True, slots=True)
 class ParsedOrderLine:
     line_no: int
-    lifecycle: Lifecycle
     source_sheet: str
     source_row: int
     contract_no: str | None = None
@@ -172,7 +170,6 @@ def parse(
         lines.append(
             ParsedOrderLine(
                 line_no=len(lines) + 1,
-                lifecycle=Lifecycle.ACTIVE,
                 source_sheet=layout.sheet_name,
                 source_row=row_idx,
                 **parsed_row,

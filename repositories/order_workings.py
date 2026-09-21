@@ -3,7 +3,6 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from domain.engine.workings import Lifecycle
 from models.order_line import OrderLine
 from models.order_workings import OrderWorkings
 
@@ -61,7 +60,7 @@ async def list_by_snapshot_id(db: AsyncSession, snapshot_id: uuid.UUID) -> list[
     result = await db.execute(
         select(OrderWorkings)
         .join(OrderLine, OrderWorkings.order_line_id == OrderLine.id)
-        .where(OrderLine.snapshot_id == snapshot_id, OrderLine.lifecycle == Lifecycle.ACTIVE)
+        .where(OrderLine.snapshot_id == snapshot_id)
     )
     return list(result.scalars().all())
 
@@ -76,7 +75,6 @@ async def list_active_with_bing_dnbp(db: AsyncSession, snapshot_id: uuid.UUID) -
         .join(OrderWorkings, OrderWorkings.order_line_id == OrderLine.id)
         .where(
             OrderLine.snapshot_id == snapshot_id,
-            OrderLine.lifecycle == Lifecycle.ACTIVE,
             OrderWorkings.bing_dnbp.is_not(None),
         )
     )

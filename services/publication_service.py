@@ -122,7 +122,7 @@ def _prices_changed(previous_lines: list[DnbpPublicationLine], drafts: list[Publ
 
 
 async def _assert_publishable(db: AsyncSession, snapshot_id: uuid.UUID) -> None:
-    active_issues = await validation_issues_repo.list_active_by_snapshot(db, snapshot_id)
+    active_issues = await validation_issues_repo.list_by_snapshot(db, snapshot_id)
 
     blocked = [str(issue.order_line_id) for issue in active_issues if issue.severity is Severity.BLOCK]
     if blocked:

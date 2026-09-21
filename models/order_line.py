@@ -6,7 +6,6 @@ from sqlalchemy import Date, Enum, ForeignKey, Integer, Numeric, String
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from domain.engine.workings import Lifecycle
 from domain.ingestion.types import BenchmarkMethod
 from models.base import TimestampedBase
 from models.enums import Incoterm
@@ -31,7 +30,6 @@ class OrderLine(TimestampedBase):
 
     snapshot_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("order_snapshots.id"), index=True)
     line_no: Mapped[int] = mapped_column(Integer)
-    lifecycle: Mapped[Lifecycle] = mapped_column(Enum(Lifecycle, name="lifecycle"), index=True)
 
     contract_no: Mapped[str | None] = mapped_column(String, index=True, default=None)
     customer_name: Mapped[str | None] = mapped_column(String, default=None)

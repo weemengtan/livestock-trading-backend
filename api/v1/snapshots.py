@@ -10,7 +10,6 @@ from api.deps import CurrentUser, redis_dep, require_role
 from core.db import get_db
 from core.errors import Conflict, NotFound
 from domain.engine.issues import Severity
-from domain.engine.workings import Lifecycle
 from models.enums import Role, SnapshotStatus
 from repositories import order_lines as order_lines_repo
 from repositories import order_snapshots as order_snapshots_repo
@@ -40,7 +39,6 @@ def _to_line_response(line) -> OrderLineResponse:
         id=line.id,
         snapshot_id=line.snapshot_id,
         line_no=line.line_no,
-        lifecycle=line.lifecycle.value,
         contract_no=line.contract_no,
         customer_name=line.customer_name,
         species=line.species,
@@ -142,13 +140,12 @@ async def diff(
 @router.get("/{snapshot_id}/lines", response_model=list[OrderLineResponse])
 async def list_lines(
     snapshot_id: uuid.UUID,
-    lifecycle: Lifecycle | None = Query(default=None),
     species: str | None = Query(default=None),
     current: CurrentUser = Depends(_trading_console),
     db: AsyncSession = Depends(get_db),
 ) -> list[OrderLineResponse]:
     await _get_owned_snapshot(db, snapshot_id, current.org_id)
-    lines = await order_lines_repo.list_by_snapshot(db, snapshot_id, lifecycle=lifecycle, species=species)
+    lines = await order_lines_repo.list_by_snapshot(db, snapshot_id, species=species)
     return [_to_line_response(line) for line in lines]
 
 

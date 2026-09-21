@@ -17,7 +17,6 @@ from core.reference_data import WEEKDAYS, get_active_everhealth_config
 from domain.engine.config import DEFAULT_MODEL_TYPE, EverhealthConfig
 from domain.engine.dnbp import available_model_types
 from domain.engine.impact import ImpactLineInput, ImpactPreview, compute_impact
-from domain.engine.workings import Lifecycle
 from models.enums import ReferenceDataTableKey
 from models.reference_data import ReferenceDataVersion
 from repositories import order_lines as order_lines_repo
@@ -208,7 +207,7 @@ async def preview_impact(
     latest_snapshot = await order_snapshots_repo.get_latest_for_org(db, org_id)
     lines: list[ImpactLineInput] = []
     if latest_snapshot is not None:
-        active_lines = await order_lines_repo.list_by_snapshot(db, latest_snapshot.id, lifecycle=Lifecycle.ACTIVE)
+        active_lines = await order_lines_repo.list_by_snapshot(db, latest_snapshot.id)
         lines = [
             ImpactLineInput(
                 order_line_id=str(line.id),

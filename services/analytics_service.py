@@ -17,7 +17,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.reference_data import get_operational_constants
 from domain.engine.issues import Severity
-from domain.engine.workings import Lifecycle
 from repositories import analytics as analytics_repo
 from repositories import order_lines as order_lines_repo
 from repositories import order_snapshots as order_snapshots_repo
@@ -95,7 +94,7 @@ async def order_book(db: AsyncSession, org_id: uuid.UUID) -> OrderBookResponse:
             snapshot_id=None, as_of_date=None, total_exposure_aud=MONEY_ZERO, by_species=[], by_customer=[]
         )
 
-    active_lines = await order_lines_repo.list_by_snapshot(db, snapshot.id, lifecycle=Lifecycle.ACTIVE)
+    active_lines = await order_lines_repo.list_by_snapshot(db, snapshot.id)
 
     exposure_by_species: dict[str, Decimal] = {}
     exposure_by_species_customer: dict[tuple[str, str | None], Decimal] = {}
@@ -304,9 +303,9 @@ async def exceptions(
     snapshot = await order_snapshots_repo.get_latest_for_org(db, org_id)
     blocked_rows: list[BlockedLineRow] = []
     if snapshot is not None:
-        active_lines = await order_lines_repo.list_by_snapshot(db, snapshot.id, lifecycle=Lifecycle.ACTIVE)
+        active_lines = await order_lines_repo.list_by_snapshot(db, snapshot.id)
         lines_by_id = {line.id: line for line in active_lines}
-        issues = await validation_issues_repo.list_active_by_snapshot(db, snapshot.id)
+        issues = await validation_issues_repo.list_by_snapshot(db, snapshot.id)
         for issue in issues:
             if issue.severity != Severity.BLOCK:
                 continue
