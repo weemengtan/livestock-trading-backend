@@ -4,7 +4,7 @@ cleanup previously done by hand via `docker exec ... psql -c "TRUNCATE ..."`
 so it's not retyped (and potentially mistyped) each time.
 
 Wipes: every order snapshot/line/working/issue/acknowledgment/removal,
-reference-data drift records, correction requests, DNBP publications
+correction requests, DNBP publications
 (+ lines + deliveries), buy instructions (+ lines + fills), buy entries,
 and the audit log.
 
@@ -34,7 +34,6 @@ _WIPE_TABLES = [
     "validation_issues",
     "order_issue_acknowledgments",
     "order_line_removals",
-    "reference_data_drift",
     "correction_requests",
     "dnbp_publications",
     "dnbp_publication_lines",

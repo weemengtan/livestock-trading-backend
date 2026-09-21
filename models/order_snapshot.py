@@ -10,13 +10,11 @@ from models.enums import SnapshotStatus
 
 
 class OrderSnapshot(TimestampedBase):
-    """§7.3, §8. One immutable row per upload. `detected_layout` and
-    `abattoir_reference_tables` are the parser's own record of what it
-    found and how (domain/ingestion/layout.py's `DetectedLayout.as_jsonable`
-    and the JSON-serialised `AbattoirReferenceTables` respectively) — kept
-    here, not recomputed later, so a historical snapshot's cross-check is
-    always reproducible even if a future submission's lookup sheet
-    changes."""
+    """§7.3, §8. One immutable row per upload. `detected_layout` is the
+    parser's own record of what it found and how (domain/ingestion/
+    layout.py's `DetectedLayout.as_jsonable`, including the ingestion
+    contract version) — kept here, not recomputed later. The uploaded
+    workbook itself is not stored; `source_sha256` fingerprints it."""
 
     __tablename__ = "order_snapshots"
 
@@ -26,10 +24,8 @@ class OrderSnapshot(TimestampedBase):
 
     source_filename: Mapped[str] = mapped_column(String)
     source_sha256: Mapped[str] = mapped_column(String, index=True)
-    object_storage_key: Mapped[str] = mapped_column(String)
 
     detected_layout: Mapped[dict] = mapped_column(JSONB)
-    abattoir_reference_tables: Mapped[dict] = mapped_column(JSONB)
     parser_version: Mapped[str] = mapped_column(String)
 
     status: Mapped[SnapshotStatus] = mapped_column(

@@ -62,27 +62,6 @@ class ReferenceDataEntry(TimestampedBase):
     value: Mapped[Decimal] = mapped_column(MONEY)
 
 
-class ReferenceDataDrift(TimestampedBase):
-    """New beyond §8's literal diagram — added for §7.2 point 11 / §9.8's
-    `GET /reference-data/drift`, the same way Phase 3 added
-    dnbp_publication_deliveries beyond §8's diagram for a requirement §8
-    itself didn't model. One row per (snapshot, table, key) where the
-    abattoir's own lookup sheet disagrees with the immediately-previous
-    snapshot's stored copy. Never write-capable against §6.4/§6.5 — this is
-    a notice, not an input (§7.2 point 11 is explicit about this)."""
-
-    __tablename__ = "reference_data_drift"
-
-    snapshot_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("order_snapshots.id"), index=True)
-    table_key: Mapped[str] = mapped_column(String)  # abattoir table name, e.g. "pack_cost_by_product_type"
-    key1: Mapped[str] = mapped_column(String)  # e.g. species or product_type code
-    old_value: Mapped[Decimal | None] = mapped_column(MONEY, default=None)
-    new_value: Mapped[Decimal | None] = mapped_column(MONEY, default=None)
-    detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    acknowledged_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), default=None)
-    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
-
-
 class SpeciesRegistry(Base):
     """§6.9, §8 — open registry, rows not an enum. `code` is the primary
     key (§8's literal shape: "code PK, display_name, is_active, created_by,

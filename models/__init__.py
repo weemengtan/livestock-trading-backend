@@ -13,7 +13,6 @@ from models.organisation import Organisation
 from models.push_subscription import PushSubscription
 from models.reference_data import (
     ProductTypeRegistry,
-    ReferenceDataDrift,
     ReferenceDataEntry,
     ReferenceDataVersion,
     SpeciesRegistry,
@@ -42,7 +41,6 @@ __all__ = [
     "Organisation",
     "ProductTypeRegistry",
     "PushSubscription",
-    "ReferenceDataDrift",
     "ReferenceDataEntry",
     "ReferenceDataVersion",
     "RefreshToken",

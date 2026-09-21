@@ -22,7 +22,6 @@ from repositories import order_lines as order_lines_repo
 from repositories import order_snapshots as order_snapshots_repo
 from repositories import reference_data as reference_data_repo
 from services import audit_service
-from services.ingestion_service import deserialize_abattoir_tables
 
 # §6.1-6.3/§6.6 — abattoir-owned tables. Never valid on this route (§9.8).
 # Named here (not just absent from ReferenceDataTableKey) so a client
@@ -180,17 +179,6 @@ async def preview_impact(db: AsyncSession, version_id: uuid.UUID, *, org_id: uui
         },
     )
     return preview
-
-
-async def get_latest_abattoir_tables(db: AsyncSession, *, org_id: uuid.UUID):
-    """§9.8 `GET /reference-data/abattoir` — read-only, the latest
-    snapshot's own stored tables (§11.7's abattoir panel). Raises NotFound
-    if nothing has ever been ingested yet."""
-    snapshot = await order_snapshots_repo.get_latest_for_org(db, org_id)
-    if snapshot is None:
-        raise NotFound("Any order snapshot")
-    tables = deserialize_abattoir_tables(snapshot.abattoir_reference_tables)
-    return snapshot, tables
 
 
 async def activate_version(db: AsyncSession, version_id: uuid.UUID, *, actor_id: uuid.UUID) -> ReferenceDataVersion:

@@ -238,10 +238,12 @@ class NoActiveReferenceDataError(AppError):
         )
 
 
-class LayoutDetectionFailed(AppError):
-    """Wraps domain.ingestion.layout.LayoutDetectionError at the service
+class IngestionRejected(AppError):
+    """Wraps domain.ingestion.errors.IngestionContractError at the service
     boundary — the domain layer stays framework-agnostic (never imports
-    core/errors itself), so translation happens here, not there."""
+    core/errors itself), so translation happens here, not there. The
+    message is written for the business user; `details` carries what the
+    UI needs (e.g. the tabs that were found)."""
 
-    def __init__(self, message: str) -> None:
-        super().__init__("LAYOUT_DETECTION_FAILED", message, status_code=422)
+    def __init__(self, error) -> None:
+        super().__init__(error.code.value, error.message, status_code=422, details=error.details)

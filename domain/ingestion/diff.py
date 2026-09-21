@@ -10,7 +10,6 @@ import hashlib
 from dataclasses import dataclass, field
 from decimal import Decimal
 
-from domain.engine.workings import Lifecycle
 from domain.ingestion.workbook import ParsedOrderLine
 
 # Compared fields only — metadata like line_no/source_row/value_sources is
@@ -53,14 +52,12 @@ class LineChange:
 class SnapshotDiff:
     new_lines: list[ParsedOrderLine] = field(default_factory=list)
     changed_lines: list[LineChange] = field(default_factory=list)
-    moved_to_loaded: list[ParsedOrderLine] = field(default_factory=list)
     removed_lines: list[tuple] = field(default_factory=list)  # identity keys present before, absent now
 
     def summary(self) -> dict:
         return {
             "new_count": len(self.new_lines),
             "changed_count": len(self.changed_lines),
-            "moved_to_loaded_count": len(self.moved_to_loaded),
             "removed_count": len(self.removed_lines),
         }
 
@@ -101,15 +98,12 @@ def compare(previous: list[ParsedOrderLine] | None, current: list[ParsedOrderLin
 
     new_lines: list[ParsedOrderLine] = []
     changed_lines: list[LineChange] = []
-    moved_to_loaded: list[ParsedOrderLine] = []
 
     for key, current_line in current_by_key.items():
         previous_line = previous_by_key.get(key)
         if previous_line is None:
             new_lines.append(current_line)
             continue
-        if previous_line.lifecycle is Lifecycle.ACTIVE and current_line.lifecycle is Lifecycle.LOADED:
-            moved_to_loaded.append(current_line)
         changes = [
             FieldChange(field=name, previous=getattr(previous_line, name), current=getattr(current_line, name))
             for name in _COMPARED_FIELDS
@@ -123,6 +117,5 @@ def compare(previous: list[ParsedOrderLine] | None, current: list[ParsedOrderLin
     return SnapshotDiff(
         new_lines=new_lines,
         changed_lines=changed_lines,
-        moved_to_loaded=moved_to_loaded,
         removed_lines=removed_lines,
     )

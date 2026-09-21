@@ -9,9 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.deps import CurrentUser, redis_dep, require_role
 from core.db import get_db
 from core.errors import Conflict, NotFound
-from core.object_storage import ObjectStorage, get_object_storage
 from domain.engine.issues import Severity
 from domain.engine.workings import Lifecycle
+from domain.ingestion.contract import DEFAULT_CONTRACT
 from models.enums import Role, SnapshotStatus
 from repositories import order_lines as order_lines_repo
 from repositories import order_snapshots as order_snapshots_repo
@@ -21,6 +21,7 @@ from schemas.order_lines import OrderLineResponse, OrderWorkingsResponse
 from schemas.snapshots import (
     CalculateResponse,
     CommitSnapshotRequest,
+    IngestionContractResponse,
     IssueResponse,
     SnapshotResponse,
     UploadPreviewResponse,
@@ -32,10 +33,6 @@ router = APIRouter(prefix="/snapshots", tags=["snapshots"])
 # §9.2 — snapshot/ingestion routes are OWNER + ACCOUNTANT only. Both may
 # upload (§11.2) — the abattoir's email may land with either of them.
 _trading_console = require_role(Role.OWNER, Role.ACCOUNTANT)
-
-
-def _storage_dep() -> ObjectStorage:
-    return get_object_storage()
 
 
 def _to_line_response(line) -> OrderLineResponse:
@@ -77,6 +74,14 @@ async def _get_owned_snapshot(db: AsyncSession, snapshot_id: uuid.UUID, org_id: 
     return snapshot
 
 
+@router.get("/ingestion-contract", response_model=IngestionContractResponse)
+async def get_ingestion_contract(current: CurrentUser = Depends(_trading_console)) -> IngestionContractResponse:
+    # Declared before the `/{snapshot_id}` route so it is not captured as an id.
+    return IngestionContractResponse(
+        version=DEFAULT_CONTRACT.version, required_sheet_name=DEFAULT_CONTRACT.required_sheet_name
+    )
+
+
 @router.post("/upload", response_model=UploadPreviewResponse)
 async def upload(
     file: UploadFile = File(...),
@@ -97,10 +102,9 @@ async def commit(
     current: CurrentUser = Depends(_trading_console),
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(redis_dep),
-    storage: ObjectStorage = Depends(_storage_dep),
 ) -> SnapshotResponse:
     snapshot = await ingestion_service.commit_snapshot(
-        db, redis, storage, org_id=current.org_id, uploaded_by=current.user_id, preview_id=body.preview_id
+        db, redis, org_id=current.org_id, uploaded_by=current.user_id, preview_id=body.preview_id
     )
     await db.commit()
     return SnapshotResponse.model_validate(snapshot)

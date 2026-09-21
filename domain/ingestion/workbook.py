@@ -1,26 +1,33 @@
-"""Orchestrates headers.py / layout.py / cells.py / benchmark.py /
-lookup_sheet.py into a `ParsedSnapshot` — the one entry point the API/service
-layer calls. Everything below this module is pure dataclasses in, pure
-dataclasses out; this module is the sole place that touches `openpyxl` and
-raw file bytes.
+"""Orchestrates headers.py / layout.py / cells.py / benchmark.py into a
+`ParsedSnapshot` — the one entry point the API/service layer calls.
+Everything below this module is pure dataclasses in, pure dataclasses out;
+this module is the sole place that touches `openpyxl` and raw file bytes.
+
+Scope is fixed by the `IngestionContract`: only the Active Orders block of
+the one visible sheet it names is ever read. The workbook is opened whole
+(openpyxl cannot open a single sheet), the required sheet is gated, and
+every other sheet is removed from memory before anything is parsed — so no
+later code can read a hidden tab by accident.
 """
 
 import io
 from dataclasses import dataclass, field
 from decimal import Decimal
+from zipfile import BadZipFile
 
 import openpyxl
+from openpyxl.utils.exceptions import InvalidFileException
 
-from domain.engine.crosscheck import AbattoirReferenceTables
 from domain.engine.workings import Lifecycle
 from domain.ingestion import cells
 from domain.ingestion.benchmark import classify_benchmark_header
+from domain.ingestion.contract import DEFAULT_CONTRACT, IngestionContract
+from domain.ingestion.errors import IngestionContractError, IngestionErrorCode
 from domain.ingestion.headers import find_header_row, normalise
-from domain.ingestion.layout import DetectedLayout, detect_layout
-from domain.ingestion.lookup_sheet import find_lookup_sheet_name, parse_abattoir_tables
+from domain.ingestion.layout import DetectedLayout, locate_active_section
 from domain.ingestion.types import BenchmarkMethod, ValueSource
 
-PARSER_VERSION = "ingestion-v1"
+PARSER_VERSION = "ingestion-v2"
 
 # §5.1 / §7.2 pt 4: exactly these columns arrive already computed by the
 # abattoir's own formulas, so only these are checked for a hand-set literal.
@@ -102,89 +109,86 @@ class ParsedSnapshot:
     source_filename: str
     parser_version: str
     detected_layout: DetectedLayout
-    abattoir_tables: AbattoirReferenceTables
     lines: list[ParsedOrderLine]
 
-    @property
-    def active_lines(self) -> list[ParsedOrderLine]:
-        return [line for line in self.lines if line.lifecycle is Lifecycle.ACTIVE]
 
-    @property
-    def loaded_lines(self) -> list[ParsedOrderLine]:
-        return [line for line in self.lines if line.lifecycle is Lifecycle.LOADED]
+def _load_required_sheet(file_bytes: bytes, contract: IngestionContract, *, data_only: bool):
+    """Open the workbook, enforce that the contract's sheet exists and is
+    visible, and return that worksheet with every other sheet removed."""
+    try:
+        workbook = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=data_only)
+    except (BadZipFile, InvalidFileException, KeyError, ValueError) as exc:
+        raise IngestionContractError(
+            IngestionErrorCode.NOT_A_VALID_XLSX,
+            "This file could not be opened as an Excel (.xlsx) workbook. "
+            "Please upload the daily Active Purchase Orders file.",
+        ) from exc
+
+    target = normalise(contract.required_sheet_name)
+    sheet = next((ws for ws in workbook.worksheets if normalise(ws.title) == target), None)
+
+    if sheet is None:
+        visible_tabs = [ws.title for ws in workbook.worksheets if ws.sheet_state == "visible"]
+        raise IngestionContractError(
+            IngestionErrorCode.REQUIRED_SHEET_MISSING,
+            f"This file has no '{contract.required_sheet_name}' tab. "
+            f"Tabs found: {', '.join(visible_tabs) if visible_tabs else 'none'}. "
+            "Please upload the daily Active Purchase Orders file that includes it.",
+            {"required_sheet": contract.required_sheet_name, "visible_sheets": visible_tabs},
+        )
+
+    if sheet.sheet_state != "visible":
+        raise IngestionContractError(
+            IngestionErrorCode.REQUIRED_SHEET_HIDDEN,
+            f"The '{sheet.title}' tab is hidden in this file. Please unhide it in Excel and upload the file again.",
+            {"required_sheet": contract.required_sheet_name},
+        )
+
+    for other in [ws for ws in workbook.worksheets if ws is not sheet]:
+        workbook.remove(other)
+    return sheet
 
 
 def parse(
     file_bytes: bytes,
     *,
     filename: str,
-    cif_buffer_per_kg: Decimal,
-    fixed_cost_per_head_active: Decimal,
-    fixed_cost_per_head_loaded: Decimal,
+    contract: IngestionContract = DEFAULT_CONTRACT,
 ) -> ParsedSnapshot:
-    wb_values = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
-    wb_formulas = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=False)
+    sheet_values = _load_required_sheet(file_bytes, contract, data_only=True)
+    sheet_formulas = _load_required_sheet(file_bytes, contract, data_only=False)
 
-    layout = detect_layout(wb_values)
+    layout = locate_active_section(sheet_values, contract)
+    header = find_header_row(sheet_values, start_row=layout.header_row, max_scan_rows=1)
+    benchmark_method = _detect_benchmark_method(sheet_values, header.column_map, header.row_index)
 
     lines: list[ParsedOrderLine] = []
-    line_no = 0
-    for lifecycle, section in ((Lifecycle.ACTIVE, layout.active), (Lifecycle.LOADED, layout.loaded)):
-        if section is None:
+    for row_idx in range(layout.data_row_start, layout.data_row_end):
+        parsed_row = _parse_row(
+            sheet_values, sheet_formulas, row_idx, header.column_map, benchmark_method=benchmark_method
+        )
+        if parsed_row is None:
             continue
-        header = find_header_row(
-            wb_values[section.sheet_name], start_row=section.header_row, max_scan_rows=1
-        )
-        if header is None:
-            # Defensive — layout.py only ever returns a section whose header
-            # row it already validated. Re-derive rather than trust a stale
-            # index if that invariant is ever weakened later.
-            header = find_header_row(wb_values[section.sheet_name])
-        sheet_values = wb_values[section.sheet_name]
-        sheet_formulas = wb_formulas[section.sheet_name]
-        benchmark_method = _detect_benchmark_method(sheet_values, header.column_map, header.row_index)
-
-        for row_idx in range(section.data_row_start, section.data_row_end):
-            parsed_row = _parse_row(
-                sheet_values,
-                sheet_formulas,
-                row_idx,
-                header.column_map,
-                benchmark_method=benchmark_method,
+        lines.append(
+            ParsedOrderLine(
+                line_no=len(lines) + 1,
+                lifecycle=Lifecycle.ACTIVE,
+                source_sheet=layout.sheet_name,
+                source_row=row_idx,
+                **parsed_row,
             )
-            if parsed_row is None:
-                continue
-            line_no += 1
-            lines.append(
-                ParsedOrderLine(
-                    line_no=line_no,
-                    lifecycle=lifecycle,
-                    source_sheet=section.sheet_name,
-                    source_row=row_idx,
-                    **parsed_row,
-                )
-            )
-
-    lookup_sheet_name = find_lookup_sheet_name(wb_values)
-    if lookup_sheet_name is not None:
-        abattoir_tables = parse_abattoir_tables(
-            wb_values[lookup_sheet_name],
-            cif_buffer_per_kg=cif_buffer_per_kg,
-            fixed_cost_per_head_active=fixed_cost_per_head_active,
-            fixed_cost_per_head_loaded=fixed_cost_per_head_loaded,
         )
-    else:
-        abattoir_tables = AbattoirReferenceTables(
-            cif_buffer_per_kg=cif_buffer_per_kg,
-            fixed_cost_per_head_active=fixed_cost_per_head_active,
-            fixed_cost_per_head_loaded=fixed_cost_per_head_loaded,
+
+    if not lines:
+        raise IngestionContractError(
+            IngestionErrorCode.NO_ACTIVE_ROWS,
+            f"No Active Orders rows were found on '{layout.sheet_name}'.",
         )
 
     return ParsedSnapshot(
         source_filename=filename,
         parser_version=PARSER_VERSION,
         detected_layout=layout,
-        abattoir_tables=abattoir_tables,
         lines=lines,
     )
 

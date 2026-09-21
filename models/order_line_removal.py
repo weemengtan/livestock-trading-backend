@@ -12,14 +12,12 @@ MONEY = Numeric(18, 10)
 
 
 class OrderLineRemoval(TimestampedBase):
-    """A contract present in the previous snapshot's ACTIVE/LOADED lines
-    but absent from the newly committed one — moved to LOADED is tracked
-    separately (SnapshotDiff.moved_to_loaded); this is everything else,
-    i.e. a contract that simply vanished with no recorded reason (§7.3's
-    `removed_lines`). Never surfaced as a correction (nothing to fix —
-    the ingested data is exactly what the abattoir sent) and never
-    inferred automatically — a human records why, same acknowledge
-    discipline as reference_data_drift.
+    """A contract present in the previous snapshot's Active Orders but
+    absent from the newly committed one — a contract that simply left the
+    Active block with no recorded reason (§7.3's `removed_lines`). Never
+    surfaced as a correction (nothing to fix — the ingested data is exactly
+    what the abattoir sent) and never inferred automatically — a human
+    records why.
 
     Identity fields + a snapshot of customer_name/amount_aud are copied in
     at detection time so the row reads on its own without joining back to

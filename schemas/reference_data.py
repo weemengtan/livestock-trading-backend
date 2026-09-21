@@ -100,27 +100,3 @@ class CreateProductTypeRequest(BaseModel):
     code: str
     display_name: str
 
-
-class AbattoirTablesResponse(BaseModel):
-    """§9.8 `GET /reference-data/abattoir` — the latest snapshot's stored
-    tables, read-only (§6.1-6.3, §6.6, §11.7)."""
-
-    snapshot_id: uuid.UUID
-    source_filename: str
-    pack_cost_by_product_type: dict[str, Decimal]
-    offal_return_ph_by_species: dict[str, Decimal]
-    skin_return_ph_by_species: dict[str, Decimal]
-
-
-class DriftResponse(BaseModel):
-    id: uuid.UUID
-    snapshot_id: uuid.UUID
-    table_key: str
-    key1: str
-    old_value: Decimal | None
-    new_value: Decimal | None
-    detected_at: datetime
-    acknowledged_by: uuid.UUID | None
-    acknowledged_at: datetime | None
-
-    model_config = {"from_attributes": True}

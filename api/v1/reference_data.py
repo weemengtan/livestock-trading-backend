@@ -1,19 +1,17 @@
 import dataclasses
 import uuid
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.deps import CurrentUser, require_role
 from core.db import get_db
 from models.enums import Role
 from schemas.reference_data import (
-    AbattoirTablesResponse,
     ActiveConfigResponse,
     CreateProductTypeRequest,
     CreateSpeciesRequest,
     CreateVersionRequest,
-    DriftResponse,
     ImpactLineResponse,
     ImpactPreviewResponse,
     ProductTypeResponse,
@@ -22,7 +20,7 @@ from schemas.reference_data import (
     ReferenceDataVersionResponse,
     SpeciesResponse,
 )
-from services import reference_data_drift_service, reference_data_service, registry_service
+from services import reference_data_service, registry_service
 
 router = APIRouter(prefix="/reference-data", tags=["reference-data"])
 
@@ -95,36 +93,6 @@ async def activate_version(
     version = await reference_data_service.activate_version(db, version_id, actor_id=current.user_id)
     await db.commit()
     return version
-
-
-@router.get("/abattoir", response_model=AbattoirTablesResponse)
-async def get_abattoir_tables(current: CurrentUser = Depends(_trading_console), db: AsyncSession = Depends(get_db)):
-    snapshot, tables = await reference_data_service.get_latest_abattoir_tables(db, org_id=current.org_id)
-    return AbattoirTablesResponse(
-        snapshot_id=snapshot.id,
-        source_filename=snapshot.source_filename,
-        pack_cost_by_product_type=tables.pack_cost_by_product_type,
-        offal_return_ph_by_species=tables.offal_return_ph_by_species,
-        skin_return_ph_by_species=tables.skin_return_ph_by_species,
-    )
-
-
-@router.get("/drift", response_model=list[DriftResponse])
-async def list_drift(
-    unacknowledged: bool = Query(default=False),
-    current: CurrentUser = Depends(_trading_console),
-    db: AsyncSession = Depends(get_db),
-):
-    return await reference_data_drift_service.list_drift(db, unacknowledged_only=unacknowledged)
-
-
-@router.post("/drift/{drift_id}/acknowledge", response_model=DriftResponse)
-async def acknowledge_drift(
-    drift_id: uuid.UUID, current: CurrentUser = Depends(_trading_console), db: AsyncSession = Depends(get_db)
-):
-    drift = await reference_data_drift_service.acknowledge(db, drift_id, actor_id=current.user_id)
-    await db.commit()
-    return drift
 
 
 @router.get("/species", response_model=list[SpeciesResponse])

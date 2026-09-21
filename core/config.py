@@ -50,21 +50,6 @@ class Settings(BaseSettings):
     # needs no re-enrollment.
     mfa_enforcement_enabled: bool = True
 
-    # Phase 2 — original-file retention (§7.2 pt 9, §8). "local" is the
-    # documented local-dev/CI stand-in (backend/.docker-data/objects/,
-    # already gitignored); "s3" is the real answer for the Railway
-    # deployment, which has no native blob storage — point it at any
-    # S3-compatible bucket (Cloudflare R2, Backblaze B2, self-hosted MinIO,
-    # or AWS S3 itself) via boto3, which is Apache-2.0/FOSS regardless of
-    # which of those the bucket actually is.
-    object_storage_backend: str = "local"
-    object_storage_local_dir: str = ".docker-data/objects"
-    object_storage_bucket: str = "livestock-order-snapshots"
-    object_storage_endpoint_url: str | None = None
-    object_storage_region: str = "auto"
-    object_storage_access_key_id: str = ""
-    object_storage_secret_access_key: str = ""
-
     # Phase 2 — where EverhealthConfig loads its seed values from (§6).
     # Defaults to backend/fixtures/reference-data-seed.json (vendored —
     # see backend/fixtures/README.md for why); override only for a

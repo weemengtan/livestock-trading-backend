@@ -1,5 +1,11 @@
-"""§5.2 — recomputation of the abattoir's own A-V formulas, for validation
-only. A mismatch raises a warning/correction; this module NEVER overwrites
+"""§5.2 — recomputation of the abattoir's own A-V formulas that can be
+derived from the same row alone (Q, U, V), for validation only. Checks that
+need the abattoir's separate lookup tables (K, M, N, O) or the abattoir's
+fixed cost per head (T) are not performed: this system reads only the
+Active Orders block of `Profitability Analysis` and takes no reference
+data from other tabs or files.
+
+A mismatch raises a warning/correction. A mismatch raises a warning/correction; this module NEVER overwrites
 the received value (Constraint 1) and NEVER computes anything the engine
 depends on.
 
@@ -16,52 +22,12 @@ engine package is `issues.py`, which carries no calculation logic — plain
 data types only.
 """
 
-from dataclasses import dataclass, field
 from decimal import Decimal
 
 from domain.engine import issues as codes
 from domain.engine.issues import Severity, ValidationIssue
 
 RELATIVE_TOLERANCE = Decimal("0.000001")  # 1e-6, per §5.2
-
-
-@dataclass(frozen=True, slots=True)
-class AbattoirReferenceTables:
-    """Abattoir-owned lookup tables (§6.1-6.3, §6.7), ingested verbatim from
-    each submission's own lookup sheet. Cross-check only — never used to
-    compute anything the engine or a publication depends on (§5.1)."""
-
-    cif_buffer_per_kg: Decimal
-    pack_cost_by_product_type: dict[str, Decimal] = field(default_factory=dict)
-    offal_return_ph_by_species: dict[str, Decimal] = field(default_factory=dict)
-    skin_return_ph_by_species: dict[str, Decimal] = field(default_factory=dict)
-    fixed_cost_per_head_active: Decimal = Decimal(40)
-    fixed_cost_per_head_loaded: Decimal = Decimal(34)
-
-
-def expected_nrv_per_kg(avg_price_aud: Decimal, incoterm: str, tables: AbattoirReferenceTables) -> Decimal:
-    """K ≈ (J == "CIF") ? G - 0.30 : G"""
-    if incoterm == "CIF":
-        return avg_price_aud - tables.cif_buffer_per_kg
-    return avg_price_aud
-
-
-def expected_pack_cost_ph(product_type: str, tables: AbattoirReferenceTables) -> Decimal | None:
-    """M ≈ abattoir_pack_cost_table[I]"""
-    return tables.pack_cost_by_product_type.get(product_type)
-
-
-def expected_offal_return_ph(species: str, tables: AbattoirReferenceTables) -> Decimal | None:
-    """N ≈ abattoir_offal_table[D]"""
-    return tables.offal_return_ph_by_species.get(species)
-
-
-def expected_skin_return_ph(species: str, tables: AbattoirReferenceTables) -> Decimal | None:
-    """O ≈ abattoir_skin_table[D]. Deliberate divergences (e.g. GOAT's
-    hand-set 0.5) are expected and reported via HAND_SET_VALUE elsewhere —
-    this function only ever returns the table's own value, never "corrects"
-    anything."""
-    return tables.skin_return_ph_by_species.get(species)
 
 
 def expected_mom_ph(
@@ -89,24 +55,6 @@ def expected_estimated_heads(qty_kg: Decimal, avg_weight_kg: Decimal) -> Decimal
 def expected_total_livestock_cost(livestock_cost_per_kg: Decimal, qty_kg: Decimal) -> Decimal:
     """V ≈ L * F"""
     return livestock_cost_per_kg * qty_kg
-
-
-def expected_dnbp_gayan(
-    *,
-    nrv_per_kg: Decimal,
-    avg_weight_kg: Decimal,
-    pack_cost_ph: Decimal,
-    offal_return_ph: Decimal,
-    skin_return_ph: Decimal,
-    lifecycle: str,
-    tables: AbattoirReferenceTables,
-) -> Decimal:
-    """T ≈ (P > 0) ? K - ((fixed_cost + M - O - N) / P) : 0
-    where fixed_cost = 40 (ACTIVE) or 34 (LOADED)."""
-    if avg_weight_kg <= 0:
-        return Decimal(0)
-    fixed_cost = tables.fixed_cost_per_head_active if lifecycle == "ACTIVE" else tables.fixed_cost_per_head_loaded
-    return nrv_per_kg - ((fixed_cost + pack_cost_ph - skin_return_ph - offal_return_ph) / avg_weight_kg)
 
 
 def check(column: str, received: Decimal | None, expected: Decimal | None) -> ValidationIssue | None:

@@ -5,9 +5,13 @@ for `settings.upload_preview_ttl_seconds` — nothing touches Postgres until
 POST /snapshots confirms it. This is what makes "drop a file, see a
 preview, confirm" cheap to get wrong and retry: an abandoned upload leaves
 no trace.
+
+The uploaded workbook itself is never persisted (not in Redis, not in
+object storage): only the extracted Active Orders rows, the file's SHA-256
+fingerprint and the audit trail are kept. The preview cache holds the
+parsed rows and that fingerprint, never the file bytes.
 """
 
-import base64
 import hashlib
 import json
 import uuid
@@ -18,25 +22,20 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import settings
-from core.errors import LayoutDetectionFailed, PreviewExpired
-from core.object_storage import ObjectStorage
-from core.reference_data import get_abattoir_fixed_costs, get_active_everhealth_config
-from domain.engine.crosscheck import AbattoirReferenceTables
+from core.errors import IngestionRejected, PreviewExpired
 from domain.engine.workings import Lifecycle
 from domain.ingestion import diff as diff_module
-from domain.ingestion.abattoir_drift import compare_abattoir_tables
-from domain.ingestion.layout import DetectedLayout, LayoutDetectionError, SectionLocation
+from domain.ingestion.errors import IngestionContractError
+from domain.ingestion.layout import DetectedLayout
 from domain.ingestion.types import BenchmarkMethod, ValueSource
 from domain.ingestion.workbook import ParsedOrderLine, ParsedSnapshot, parse
 from models.enums import Incoterm, SnapshotStatus
 from models.order_line import OrderLine
 from models.order_line_removal import OrderLineRemoval
 from models.order_snapshot import OrderSnapshot
-from models.reference_data import ReferenceDataDrift
 from repositories import order_line_removals as order_line_removals_repo
 from repositories import order_lines as order_lines_repo
 from repositories import order_snapshots as order_snapshots_repo
-from repositories import reference_data_drift as reference_data_drift_repo
 from repositories import users as users_repo
 from services import audit_service
 
@@ -52,29 +51,6 @@ def _decimal_to_str(value: Decimal | None) -> str | None:
 
 def _str_to_decimal(value: str | None) -> Decimal | None:
     return Decimal(value) if value is not None else None
-
-
-def _serialize_abattoir_tables(tables: AbattoirReferenceTables) -> dict:
-    """Shape persisted verbatim into order_snapshots.abattoir_reference_tables."""
-    return {
-        "cif_buffer_per_kg": str(tables.cif_buffer_per_kg),
-        "pack_cost_by_product_type": {k: str(v) for k, v in tables.pack_cost_by_product_type.items()},
-        "offal_return_ph_by_species": {k: str(v) for k, v in tables.offal_return_ph_by_species.items()},
-        "skin_return_ph_by_species": {k: str(v) for k, v in tables.skin_return_ph_by_species.items()},
-        "fixed_cost_per_head_active": str(tables.fixed_cost_per_head_active),
-        "fixed_cost_per_head_loaded": str(tables.fixed_cost_per_head_loaded),
-    }
-
-
-def deserialize_abattoir_tables(data: dict) -> AbattoirReferenceTables:
-    return AbattoirReferenceTables(
-        cif_buffer_per_kg=Decimal(data["cif_buffer_per_kg"]),
-        pack_cost_by_product_type={k: Decimal(v) for k, v in data["pack_cost_by_product_type"].items()},
-        offal_return_ph_by_species={k: Decimal(v) for k, v in data["offal_return_ph_by_species"].items()},
-        skin_return_ph_by_species={k: Decimal(v) for k, v in data["skin_return_ph_by_species"].items()},
-        fixed_cost_per_head_active=Decimal(data["fixed_cost_per_head_active"]),
-        fixed_cost_per_head_loaded=Decimal(data["fixed_cost_per_head_loaded"]),
-    )
 
 
 def _serialize_line(line: ParsedOrderLine) -> dict:
@@ -141,47 +117,11 @@ def _deserialize_line(data: dict) -> ParsedOrderLine:
     )
 
 
-def _serialize_layout(layout: DetectedLayout) -> dict:
-    def _section(section: SectionLocation | None) -> dict | None:
-        if section is None:
-            return None
-        return {
-            "sheet_name": section.sheet_name,
-            "header_row": section.header_row,
-            "data_row_start": section.data_row_start,
-            "data_row_end": section.data_row_end,
-        }
-
-    return {
-        "strategy": layout.strategy,
-        "loaded_strategy": layout.loaded_strategy,
-        "active": _section(layout.active),
-        "loaded": _section(layout.loaded),
-        "candidates_considered": layout.candidates_considered,
-    }
-
-
-def _deserialize_layout(data: dict) -> DetectedLayout:
-    def _section(section: dict | None) -> SectionLocation | None:
-        if section is None:
-            return None
-        return SectionLocation(**section)
-
-    return DetectedLayout(
-        strategy=data["strategy"],
-        loaded_strategy=data["loaded_strategy"],
-        active=_section(data["active"]),
-        loaded=_section(data["loaded"]),
-        candidates_considered=data["candidates_considered"],
-    )
-
-
 def _serialize_parsed_snapshot(parsed: ParsedSnapshot) -> dict:
     return {
         "source_filename": parsed.source_filename,
         "parser_version": parsed.parser_version,
-        "detected_layout": _serialize_layout(parsed.detected_layout),
-        "abattoir_tables": _serialize_abattoir_tables(parsed.abattoir_tables),
+        "detected_layout": parsed.detected_layout.as_jsonable(),
         "lines": [_serialize_line(line) for line in parsed.lines],
     }
 
@@ -190,8 +130,7 @@ def _deserialize_parsed_snapshot(data: dict) -> ParsedSnapshot:
     return ParsedSnapshot(
         source_filename=data["source_filename"],
         parser_version=data["parser_version"],
-        detected_layout=_deserialize_layout(data["detected_layout"]),
-        abattoir_tables=deserialize_abattoir_tables(data["abattoir_tables"]),
+        detected_layout=DetectedLayout(**data["detected_layout"]),
         lines=[_deserialize_line(line) for line in data["lines"]],
     )
 
@@ -288,7 +227,6 @@ def diff_to_jsonable(snapshot_diff: diff_module.SnapshotDiff) -> dict:
             {"identity_key": list(c.identity_key), "changes": [_field_change(fc) for fc in c.changes]}
             for c in snapshot_diff.changed_lines
         ],
-        "moved_to_loaded": [_line(line) for line in snapshot_diff.moved_to_loaded],
         "removed_lines": [list(key) for key in snapshot_diff.removed_lines],
         "summary": snapshot_diff.summary(),
     }
@@ -308,18 +246,10 @@ async def create_upload_preview(
 ) -> dict:
     previous_snapshot = await order_snapshots_repo.get_latest_for_org(db, org_id)
 
-    config = await get_active_everhealth_config(db)
-    fixed_active, fixed_loaded = get_abattoir_fixed_costs()
     try:
-        parsed = parse(
-            file_bytes,
-            filename=filename,
-            cif_buffer_per_kg=config.cif_buffer_per_kg,
-            fixed_cost_per_head_active=fixed_active,
-            fixed_cost_per_head_loaded=fixed_loaded,
-        )
-    except LayoutDetectionError as exc:
-        raise LayoutDetectionFailed(str(exc)) from exc
+        parsed = parse(file_bytes, filename=filename)
+    except IngestionContractError as exc:
+        raise IngestionRejected(exc) from exc
 
     previous_lines: list[ParsedOrderLine] | None = None
     if previous_snapshot is not None:
@@ -332,8 +262,9 @@ async def create_upload_preview(
     # like something already sitting in the current snapshot, since §11.2
     # lets both Owner and Accountant upload and either could've beaten the
     # other to it.
+    source_sha256 = hashlib.sha256(file_bytes).hexdigest()
     duplicate_of_current = None
-    if previous_snapshot is not None and hashlib.sha256(file_bytes).hexdigest() == previous_snapshot.source_sha256:
+    if previous_snapshot is not None and source_sha256 == previous_snapshot.source_sha256:
         uploader = await users_repo.get_by_id(db, previous_snapshot.uploaded_by)
         duplicate_of_current = {
             "snapshot_id": previous_snapshot.id,
@@ -345,7 +276,7 @@ async def create_upload_preview(
     cache_payload = {
         "org_id": str(org_id),
         "filename": filename,
-        "file_bytes_b64": base64.b64encode(file_bytes).decode("ascii"),
+        "source_sha256": source_sha256,
         "parsed": _serialize_parsed_snapshot(parsed),
     }
     await redis.set(
@@ -357,8 +288,7 @@ async def create_upload_preview(
     return {
         "preview_id": preview_id,
         "detected_layout": parsed.detected_layout.as_jsonable(),
-        "active_count": len(parsed.active_lines),
-        "loaded_count": len(parsed.loaded_lines),
+        "active_count": len(parsed.lines),
         "diff": diff_to_jsonable(snapshot_diff),
         "duplicate_of_current": duplicate_of_current,
     }
@@ -367,7 +297,6 @@ async def create_upload_preview(
 async def commit_snapshot(
     db: AsyncSession,
     redis: Redis,
-    storage: ObjectStorage,
     *,
     org_id: uuid.UUID,
     uploaded_by: uuid.UUID,
@@ -380,23 +309,12 @@ async def commit_snapshot(
     if cache_payload["org_id"] != str(org_id):
         raise PreviewExpired()
 
-    file_bytes = base64.b64decode(cache_payload["file_bytes_b64"])
     parsed = _deserialize_parsed_snapshot(cache_payload["parsed"])
+    source_sha256 = cache_payload["source_sha256"]
 
-    # §7.2 point 11 — fetched before the new snapshot is created, so this is
-    # genuinely "the previous submission's tables", never the one about to
-    # be written.
     previous_snapshot = await order_snapshots_repo.get_latest_for_org(db, org_id)
-    previous_tables = (
-        deserialize_abattoir_tables(previous_snapshot.abattoir_reference_tables)
-        if previous_snapshot is not None
-        else None
-    )
 
-    source_sha256 = hashlib.sha256(file_bytes).hexdigest()
     snapshot_id = uuid.uuid4()
-    storage_key = f"snapshots/{snapshot_id}/{cache_payload['filename']}"
-    storage.put(storage_key, file_bytes)
 
     snapshot = OrderSnapshot(
         id=snapshot_id,
@@ -404,9 +322,7 @@ async def commit_snapshot(
         uploaded_by=uploaded_by,
         source_filename=cache_payload["filename"],
         source_sha256=source_sha256,
-        object_storage_key=storage_key,
-        detected_layout=_serialize_layout(parsed.detected_layout),
-        abattoir_reference_tables=_serialize_abattoir_tables(parsed.abattoir_tables),
+        detected_layout=parsed.detected_layout.as_jsonable(),
         parser_version=parsed.parser_version,
         status=SnapshotStatus.PARSED,
     )
@@ -414,8 +330,8 @@ async def commit_snapshot(
     await order_lines_repo.create_many(db, [_order_line_model(snapshot_id, line) for line in parsed.lines])
 
     # §7.3's removed_lines, persisted rather than shown once in the preview
-    # and discarded — a contract that silently disappears (not moved to
-    # LOADED, just gone) otherwise leaves no record of why.
+    # and discarded — a contract that silently disappears from the Active
+    # block otherwise leaves no record of why.
     if previous_snapshot is not None:
         previous_db_lines = await order_lines_repo.list_by_snapshot(db, previous_snapshot.id)
         previous_db_lines_by_key = {parsed_line_from_db(line).identity_key(): line for line in previous_db_lines}
@@ -440,24 +356,6 @@ async def commit_snapshot(
                 ],
             )
 
-    drift_rows = compare_abattoir_tables(previous_tables, parsed.abattoir_tables)
-    if drift_rows:
-        now = datetime.now(UTC)
-        await reference_data_drift_repo.create_many(
-            db,
-            [
-                ReferenceDataDrift(
-                    snapshot_id=snapshot_id,
-                    table_key=row.table_key,
-                    key1=row.key1,
-                    old_value=row.old_value,
-                    new_value=row.new_value,
-                    detected_at=now,
-                )
-                for row in drift_rows
-            ],
-        )
-
     await audit_service.write(
         db,
         actor_id=uploaded_by,
@@ -467,8 +365,9 @@ async def commit_snapshot(
         after={
             "source_filename": snapshot.source_filename,
             "source_sha256": source_sha256,
-            "active_count": len(parsed.active_lines),
-            "loaded_count": len(parsed.loaded_lines),
+            "active_count": len(parsed.lines),
+            "parser_version": parsed.parser_version,
+            "contract_version": parsed.detected_layout.contract_version,
         },
     )
 
