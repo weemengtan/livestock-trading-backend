@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.config import settings
 from core.errors import AppError, Conflict, FourEyesRequired, NotFound
 from domain.ingestion.contract import IngestionContract
-from domain.ingestion.headers import SYNONYMS
+from domain.ingestion.headers import PARSED_FIELDS, AmbiguousHeaderError, build_header_lookup, normalise
 from models.ingestion_contract import IngestionContractRecord
 from repositories import ingestion_contracts as contracts_repo
 from services import audit_service
@@ -38,6 +38,9 @@ def to_domain(record: IngestionContractRecord) -> IngestionContract:
         section_end_tokens=frozenset(record.section_end_tokens),
         title_scan_rows=record.title_scan_rows,
         required_columns=dict(record.required_columns),
+        header_synonyms={field: frozenset(spellings) for field, spellings in record.header_synonyms.items()},
+        header_scan_rows=record.header_scan_rows,
+        min_header_matches=record.min_header_matches,
     )
 
 
@@ -60,6 +63,9 @@ def validate(
     section_end_tokens: list[str],
     title_scan_rows: int,
     required_columns: dict[str, str],
+    header_synonyms: dict[str, list[str]],
+    header_scan_rows: int,
+    min_header_matches: int,
 ) -> None:
     if not version.strip():
         raise _invalid("A contract needs a version label.")
@@ -70,7 +76,7 @@ def validate(
             raise _invalid(f"The {name} marker needs at least one word.")
     if not 1 <= title_scan_rows <= 50:
         raise _invalid("title_scan_rows must be between 1 and 50.")
-    unknown = sorted(set(required_columns) - set(SYNONYMS))
+    unknown = sorted((set(required_columns) | set(header_synonyms)) - PARSED_FIELDS)
     if unknown:
         raise _invalid(f"Unknown column field(s): {', '.join(unknown)}.")
     missing = sorted(_MANDATORY_FIELDS - set(required_columns))
@@ -78,6 +84,22 @@ def validate(
         raise _invalid(f"The contract must require: {', '.join(missing)}.")
     if any(not label.strip() for label in required_columns.values()):
         raise _invalid("Every required column needs a label to show the user.")
+
+    cleaned = {f: [s for s in spellings if normalise(s)] for f, spellings in header_synonyms.items()}
+    without_headers = sorted(f for f in required_columns if not cleaned.get(f))
+    if without_headers:
+        raise _invalid(f"Every required column needs at least one accepted header: {', '.join(without_headers)}.")
+    try:
+        build_header_lookup(cleaned)
+    except AmbiguousHeaderError as exc:
+        raise _invalid(str(exc)) from exc
+    mappable = sum(1 for spellings in cleaned.values() if spellings)
+    if not 1 <= header_scan_rows <= 100:
+        raise _invalid("header_scan_rows must be between 1 and 100.")
+    if not 1 <= min_header_matches <= mappable:
+        raise _invalid(f"min_header_matches must be between 1 and the {mappable} fields that have accepted headers.")
+    if min_header_matches < len(required_columns):
+        raise _invalid("min_header_matches cannot be lower than the number of required columns.")
 
 
 async def create_contract(
@@ -90,6 +112,9 @@ async def create_contract(
     section_end_tokens: list[str],
     title_scan_rows: int,
     required_columns: dict[str, str],
+    header_synonyms: dict[str, list[str]],
+    header_scan_rows: int,
+    min_header_matches: int,
     note: str | None,
 ) -> IngestionContractRecord:
     active_tokens = [t.strip().lower() for t in active_title_tokens]
@@ -101,6 +126,9 @@ async def create_contract(
         section_end_tokens=end_tokens,
         title_scan_rows=title_scan_rows,
         required_columns=required_columns,
+        header_synonyms=header_synonyms,
+        header_scan_rows=header_scan_rows,
+        min_header_matches=min_header_matches,
     )
     if await contracts_repo.get_by_version(db, version.strip()) is not None:
         raise Conflict("CONTRACT_VERSION_EXISTS", f"A contract with version '{version.strip()}' already exists.")
@@ -114,6 +142,11 @@ async def create_contract(
             section_end_tokens=end_tokens,
             title_scan_rows=title_scan_rows,
             required_columns=required_columns,
+            header_synonyms={
+                field: [s.strip() for s in spellings if s.strip()] for field, spellings in header_synonyms.items()
+            },
+            header_scan_rows=header_scan_rows,
+            min_header_matches=min_header_matches,
             note=note,
             is_active=False,
             created_by=actor_id,

@@ -80,7 +80,10 @@ def locate_active_section(sheet, contract: IngestionContract) -> DetectedLayout:
             "Please check the file is the daily Active Purchase Orders workbook.",
         )
 
-    header = find_header_row(sheet)
+    lookup = contract.header_lookup()
+    header = find_header_row(
+        sheet, lookup, min_matches=contract.min_header_matches, max_scan_rows=contract.header_scan_rows
+    )
     if header is None:
         raise IngestionContractError(
             IngestionErrorCode.ACTIVE_SECTION_NOT_FOUND,

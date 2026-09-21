@@ -157,7 +157,13 @@ def parse(
     sheet_formulas = _load_required_sheet(file_bytes, contract, data_only=False)
 
     layout = locate_active_section(sheet_values, contract)
-    header = find_header_row(sheet_values, start_row=layout.header_row, max_scan_rows=1)
+    header = find_header_row(
+        sheet_values,
+        contract.header_lookup(),
+        min_matches=contract.min_header_matches,
+        start_row=layout.header_row,
+        max_scan_rows=1,
+    )
     benchmark_method = _detect_benchmark_method(sheet_values, header.column_map, header.row_index)
 
     lines: list[ParsedOrderLine] = []

@@ -26,6 +26,9 @@ class IngestionContractRecord(TimestampedBase):
     section_end_tokens: Mapped[list] = mapped_column(JSONB)
     title_scan_rows: Mapped[int] = mapped_column(Integer)
     required_columns: Mapped[dict] = mapped_column(JSONB)
+    header_synonyms: Mapped[dict] = mapped_column(JSONB)  # field -> accepted header spellings
+    header_scan_rows: Mapped[int] = mapped_column(Integer)
+    min_header_matches: Mapped[int] = mapped_column(Integer)
     note: Mapped[str | None] = mapped_column(String, default=None)
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=False)

@@ -12,6 +12,8 @@ not a code change. Each snapshot records the version it was parsed under.
 
 from dataclasses import dataclass
 
+from domain.ingestion.headers import DEFAULT_HEADER_SYNONYMS, build_header_lookup
+
 
 @dataclass(frozen=True, slots=True)
 class IngestionContract:
@@ -22,6 +24,13 @@ class IngestionContract:
     title_scan_rows: int
     # parsed field name -> label shown to the business user when the column is missing
     required_columns: dict[str, str]
+    # parsed field name -> the header spellings accepted for it
+    header_synonyms: dict[str, frozenset[str]]
+    header_scan_rows: int  # how many rows from the top to look for the header row
+    min_header_matches: int  # how many recognised headers make a row "the header row"
+
+    def header_lookup(self) -> dict[str, str]:
+        return build_header_lookup(self.header_synonyms)
 
 
 # Test baseline only: the runtime always loads the active contract from Postgres
@@ -39,4 +48,7 @@ DEFAULT_CONTRACT = IngestionContract(
         "qty_kg": "Sum of Total QTY",
         "avg_price_aud": "Average of Price AUD",
     },
+    header_synonyms=DEFAULT_HEADER_SYNONYMS,
+    header_scan_rows=20,
+    min_header_matches=6,
 )
