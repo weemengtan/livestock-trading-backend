@@ -279,7 +279,7 @@ async def export_instruction(
         instruction=instruction,
         lines=lines,
         fills_by_line=fills_by_line,
-        saleyard_calendar=get_saleyard_calendar(),
+        saleyard_calendar=await get_saleyard_calendar(db),
         week_start=week_start,
         week_end=week_end,
         reconciliation=rows,

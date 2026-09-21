@@ -1,7 +1,7 @@
 """Demo/dev seed for the Market Intelligence module (competitor bid
 observations) — grounded in the app's own domain data rather than invented
 saleyards or species: trading days come from the real saleyard_calendar
-(Bendigo/Ballarat/Wagga/Griffith, fixtures/reference-data-seed.json, via
+(the active saleyard calendar, via
 core.reference_data.get_saleyard_calendar), per-species weights start from
 that same file's standard_weight_by_species, and the weight jitter uses the
 seeded buyer_weight_band_tolerance_pct (15%) operational constant.
@@ -39,7 +39,7 @@ SEED_MARKER = "[seed:market-intel-demo]"
 WEEKS_OF_HISTORY = 10
 RANDOM_SEED = 20260917  # fixed — same distribution shape on every run, only the date window shifts with "today"
 
-# Same species set as fixtures/reference-data-seed.json's open species
+# Same species set as the open species
 # registry. Per-head standard weight (kg) mirrors that file's
 # standard_weight_by_species — MUTTON is absent there (a known data gap,
 # see that file's own comment), so 24kg is used here, the value that
@@ -86,10 +86,10 @@ def _weighted_head_count(rng: random.Random) -> int:
     return rng.choice([5, 8, 10, 12, 15, 18, 20, 25, 30])
 
 
-def _build_rows(*, org_id: uuid.UUID, observer_id: uuid.UUID) -> list[MarketObservation]:
+def _build_rows(
+    *, org_id: uuid.UUID, observer_id: uuid.UUID, calendar, weight_tolerance_pct: Decimal
+) -> list[MarketObservation]:
     rng = random.Random(RANDOM_SEED)
-    calendar = get_saleyard_calendar()
-    weight_tolerance_pct = get_operational_constants().buyer_weight_band_tolerance_pct / Decimal(100)
 
     rows: list[MarketObservation] = []
     today = date.today()
@@ -156,7 +156,11 @@ async def main() -> None:
         )
         print(f"Removed {deleted.rowcount} previously seeded market observation(s).")
 
-        rows = _build_rows(org_id=org.id, observer_id=buyer.id)
+        calendar = await get_saleyard_calendar(session)
+        weight_tolerance_pct = (await get_operational_constants(session)).buyer_weight_band_tolerance_pct / Decimal(100)
+        rows = _build_rows(
+            org_id=org.id, observer_id=buyer.id, calendar=calendar, weight_tolerance_pct=weight_tolerance_pct
+        )
         session.add_all(rows)
         await session.commit()
 

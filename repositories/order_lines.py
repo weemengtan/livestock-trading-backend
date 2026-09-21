@@ -3,7 +3,6 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from domain.engine.workings import Lifecycle
 from models.order_line import OrderLine
 
 
@@ -18,11 +17,9 @@ async def get_by_id(db: AsyncSession, order_line_id: uuid.UUID) -> OrderLine | N
 
 
 async def list_by_snapshot(
-    db: AsyncSession, snapshot_id: uuid.UUID, *, lifecycle: Lifecycle | None = None, species: str | None = None
+    db: AsyncSession, snapshot_id: uuid.UUID, *, species: str | None = None
 ) -> list[OrderLine]:
     stmt = select(OrderLine).where(OrderLine.snapshot_id == snapshot_id)
-    if lifecycle is not None:
-        stmt = stmt.where(OrderLine.lifecycle == lifecycle)
     if species is not None:
         stmt = stmt.where(OrderLine.species == species)
     result = await db.execute(stmt.order_by(OrderLine.line_no))

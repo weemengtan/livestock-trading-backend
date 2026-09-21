@@ -1,20 +1,21 @@
 """Everhealth-owned reference configuration that drives the engine (PRD §6).
 
-Plain, in-memory, effective-dated snapshot. Loading a snapshot from Postgres
-(reference_data_versions/reference_data_entries, §8) is a later phase's
-concern — this module only defines the shape and a JSON-loading convenience
-for tests and local bootstrap scripts, which is why `from_seed_json` is the
-one function here allowed to touch the filesystem.
+Plain, in-memory, effective-dated snapshot. The runtime loads it from
+Postgres (reference_data_versions/reference_data_entries, §8) in
+core/reference_data.py — this module only defines the shape and is pure: it
+never touches the filesystem.
 
 species is a plain `str` key into these dicts, never an Enum/Literal — it is
 an open, admin-managed registry (§6.9), not a closed type.
 """
 
-import json
 from dataclasses import dataclass, field
 from decimal import Decimal
-from pathlib import Path
 from typing import Any
+
+# The DNBP formula a reference-data version selects. The implementations are a
+# whitelist in domain/engine/dnbp.py; the version only names one.
+DEFAULT_MODEL_TYPE = "FACTOR_AFTER_BUFFER"
 
 
 def _to_decimal(value: Any) -> Decimal:
@@ -29,6 +30,11 @@ class EverhealthConfig:
     dnbp_factor_by_species: dict[str, Decimal] = field(default_factory=dict)
     standard_weight_by_species: dict[str, Decimal] = field(default_factory=dict)
     ref_data_version: str = "unversioned"
+    # Opaque id of the reference_data_versions row this was loaded from
+    # (None for a config built from values/seed in tests). Stamped onto every
+    # computed workings row so a result names the exact version it used.
+    version_id: str | None = None
+    model_type: str = DEFAULT_MODEL_TYPE
 
     @classmethod
     def from_values(
@@ -38,26 +44,14 @@ class EverhealthConfig:
         dnbp_factor_by_species: dict[str, Any],
         standard_weight_by_species: dict[str, Any] | None = None,
         ref_data_version: str = "unversioned",
+        version_id: str | None = None,
+        model_type: str = DEFAULT_MODEL_TYPE,
     ) -> "EverhealthConfig":
         return cls(
             cif_buffer_per_kg=_to_decimal(cif_buffer_per_kg),
             dnbp_factor_by_species={k: _to_decimal(v) for k, v in dnbp_factor_by_species.items()},
             standard_weight_by_species={k: _to_decimal(v) for k, v in (standard_weight_by_species or {}).items()},
             ref_data_version=ref_data_version,
-        )
-
-    @classmethod
-    def from_seed_json(cls, path: str | Path) -> "EverhealthConfig":
-        """Build a config from fixtures/reference-data-seed.json's shape (or
-        any file matching it). The caller supplies the path explicitly —
-        this module stays a pure, filesystem-agnostic dataclass loader and
-        never hardcodes where the seed file lives (callers like
-        core/reference_data.py and tests/engine/helpers.py own that)."""
-        data = json.loads(Path(path).read_text())
-        everhealth = data["everhealth"]
-        return cls.from_values(
-            cif_buffer_per_kg=everhealth["cif_buffer_per_kg"]["value"],
-            dnbp_factor_by_species=everhealth["dnbp_factor_by_species"]["values"],
-            standard_weight_by_species=everhealth["standard_weight_by_species"]["values"],
-            ref_data_version=data.get("effective_from", "unversioned"),
+            version_id=version_id,
+            model_type=model_type,
         )

@@ -3,6 +3,7 @@ from models.buy_entry import BuyEntry
 from models.buy_instruction import BuyInstruction, BuyInstructionLine, BuyInstructionLineFill
 from models.correction_request import CorrectionRequest
 from models.dnbp_publication import DnbpPublication, DnbpPublicationDelivery, DnbpPublicationLine
+from models.ingestion_contract import IngestionContractRecord
 from models.market_observation import MarketObservation
 from models.order_issue_acknowledgment import OrderIssueAcknowledgment
 from models.order_line import OrderLine
@@ -13,7 +14,6 @@ from models.organisation import Organisation
 from models.push_subscription import PushSubscription
 from models.reference_data import (
     ProductTypeRegistry,
-    ReferenceDataDrift,
     ReferenceDataEntry,
     ReferenceDataVersion,
     SpeciesRegistry,
@@ -29,6 +29,7 @@ __all__ = [
     "BuyInstruction",
     "BuyInstructionLine",
     "BuyInstructionLineFill",
+    "IngestionContractRecord",
     "CorrectionRequest",
     "DnbpPublication",
     "DnbpPublicationDelivery",
@@ -42,7 +43,6 @@ __all__ = [
     "Organisation",
     "ProductTypeRegistry",
     "PushSubscription",
-    "ReferenceDataDrift",
     "ReferenceDataEntry",
     "ReferenceDataVersion",
     "RefreshToken",

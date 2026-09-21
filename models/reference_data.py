@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Numeric, String, func
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, Numeric, String, func, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -33,12 +33,25 @@ class ReferenceDataVersion(TimestampedBase):
     """
 
     __tablename__ = "reference_data_versions"
+    # Exactly one active version, enforced by the database and not only by
+    # service code: a second concurrent activation cannot commit.
+    __table_args__ = (
+        Index(
+            "uq_reference_data_versions_single_active",
+            "is_active",
+            unique=True,
+            postgresql_where=text("is_active"),
+        ),
+    )
 
     effective_from: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), default=None)
     note: Mapped[str | None] = mapped_column(String, default=None)
+    # Which whitelisted DNBP formula (domain/engine/dnbp.py) this version selects.
+    model_type: Mapped[str] = mapped_column(String, default="FACTOR_AFTER_BUFFER", server_default="FACTOR_AFTER_BUFFER")
     is_active: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    activated_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), default=None)
     impact_previewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
 
 
@@ -46,8 +59,10 @@ class ReferenceDataEntry(TimestampedBase):
     """§8: `(table_key, key1, key2, value)`. `key1` is a bare species code
     for DNBP_FACTOR/STANDARD_WEIGHT — never an FK to
     species_registry (§6.9: no FK constraint against species anywhere).
-    `key2` exists for §8 shape-parity but is unused by every table_key this
-    system has today; CIF_BUFFER_PER_KG uses neither key1 nor key2."""
+    `key2` is used only by SALEYARD_CALENDAR (the day of week);
+    CIF_BUFFER_PER_KG and the operational constants use neither key.
+    `text_value` carries free text that belongs with a numeric value
+    (SALEYARD_CALENDAR's note)."""
 
     __tablename__ = "reference_data_entries"
 
@@ -60,27 +75,7 @@ class ReferenceDataEntry(TimestampedBase):
     key1: Mapped[str | None] = mapped_column(String, default=None)
     key2: Mapped[str | None] = mapped_column(String, default=None)
     value: Mapped[Decimal] = mapped_column(MONEY)
-
-
-class ReferenceDataDrift(TimestampedBase):
-    """New beyond §8's literal diagram — added for §7.2 point 11 / §9.8's
-    `GET /reference-data/drift`, the same way Phase 3 added
-    dnbp_publication_deliveries beyond §8's diagram for a requirement §8
-    itself didn't model. One row per (snapshot, table, key) where the
-    abattoir's own lookup sheet disagrees with the immediately-previous
-    snapshot's stored copy. Never write-capable against §6.4/§6.5 — this is
-    a notice, not an input (§7.2 point 11 is explicit about this)."""
-
-    __tablename__ = "reference_data_drift"
-
-    snapshot_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("order_snapshots.id"), index=True)
-    table_key: Mapped[str] = mapped_column(String)  # abattoir table name, e.g. "pack_cost_by_product_type"
-    key1: Mapped[str] = mapped_column(String)  # e.g. species or product_type code
-    old_value: Mapped[Decimal | None] = mapped_column(MONEY, default=None)
-    new_value: Mapped[Decimal | None] = mapped_column(MONEY, default=None)
-    detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    acknowledged_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), default=None)
-    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    text_value: Mapped[str | None] = mapped_column(String, default=None)
 
 
 class SpeciesRegistry(Base):

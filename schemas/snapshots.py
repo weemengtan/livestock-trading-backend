@@ -23,11 +23,18 @@ class DuplicateOfCurrent(BaseModel):
     uploaded_at: datetime
 
 
+class IngestionContractResponse(BaseModel):
+    """What an uploaded workbook must contain — served so the UI can check a
+    file before upload without hard-coding the tab name a second time."""
+
+    version: str
+    required_sheet_name: str
+
+
 class UploadPreviewResponse(BaseModel):
     preview_id: str
     detected_layout: dict[str, Any]
     active_count: int
-    loaded_count: int
     diff: dict[str, Any]
     duplicate_of_current: DuplicateOfCurrent | None = None
 

@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.deps import CurrentUser, client_ip, get_current_user, redis_dep
 from core.config import settings
 from core.db import get_db
-from core.errors import InvalidToken, NotFound, PasswordPolicyViolation
+from core.errors import AppError, InvalidToken, NotFound, PasswordPolicyViolation
 from core.security import hash_password, password_policy_violations, verify_password
 from repositories import users as user_repo
 from schemas.auth import (
@@ -16,7 +16,7 @@ from schemas.auth import (
     MeResponse,
     TokenPair,
 )
-from services import auth_service, user_service
+from services import audit_service, auth_service, user_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -46,10 +46,22 @@ async def login(
     ip: str = Depends(client_ip),
 ) -> TokenPair:
     await auth_service.check_login_rate_limit(redis, key=f"{body.email.lower()}:{ip}")
-    user, role = await auth_service.authenticate(
-        db, email=body.email, password=body.password, totp_code=body.totp_code
-    )
+    try:
+        user, role = await auth_service.authenticate(
+            db, email=body.email, password=body.password, totp_code=body.totp_code
+        )
+    except AppError as exc:
+        await auth_service.record_login_failure(db, email=body.email, reason=exc.code)
+        raise
     access_token, raw_refresh = await auth_service.issue_token_pair(db, user=user, role=role)
+    await audit_service.write(
+        db,
+        actor_id=user.id,
+        action="auth.login_succeeded",
+        entity="user",
+        entity_id=user.id,
+        after={"role": role.value},
+    )
     await db.commit()
     _set_refresh_cookie(response, raw_refresh)
     return TokenPair(access_token=access_token)
@@ -99,11 +111,18 @@ async def change_password(
 ) -> None:
     user = await user_repo.get_by_id(db, current.user_id)
     if user is None or user.password_hash is None or not verify_password(body.current_password, user.password_hash):
+        await audit_service.write(
+            db, actor_id=current.user_id, action="auth.password_change_failed", entity="user", entity_id=current.user_id
+        )
+        await db.commit()
         raise InvalidToken("Current password is incorrect.")
     violations = password_policy_violations(body.new_password)
     if violations:
         raise PasswordPolicyViolation(violations)
     user.password_hash = hash_password(body.new_password)
+    await audit_service.write(
+        db, actor_id=current.user_id, action="auth.password_changed", entity="user", entity_id=current.user_id
+    )
     await db.commit()
 
 

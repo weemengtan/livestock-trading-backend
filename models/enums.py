@@ -71,6 +71,13 @@ class ReferenceDataTableKey(enum.StrEnum):
     CIF_BUFFER_PER_KG = "CIF_BUFFER_PER_KG"
     DNBP_FACTOR = "DNBP_FACTOR"
     STANDARD_WEIGHT = "STANDARD_WEIGHT"
+    # Operational tunables (§6.7) and the saleyard schedule (§6.8). Versioned
+    # and audited exactly like the DNBP parameters, but not source-of-truth
+    # inputs: none of them can move the published DNBP.
+    BID_CHECK_CLOSE_THRESHOLD_PCT = "BID_CHECK_CLOSE_THRESHOLD_PCT"
+    BUYER_WEIGHT_BAND_TOLERANCE_PCT = "BUYER_WEIGHT_BAND_TOLERANCE_PCT"
+    STALE_INSTRUCTION_HOURS = "STALE_INSTRUCTION_HOURS"
+    SALEYARD_CALENDAR = "SALEYARD_CALENDAR"  # key1=saleyard, key2=DAY, value=prepayment AUD, text_value=note
 
 
 class BuyInstructionStatus(enum.StrEnum):

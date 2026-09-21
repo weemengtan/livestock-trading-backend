@@ -55,32 +55,6 @@ HAND_SET_VALUE = "HAND_SET_VALUE"
 # INFO
 WEIGHT_OUTLIER = "WEIGHT_OUTLIER"
 
-# --- §5.7.1 LOADED-line rules (P/L analysis only; never gate publication) --
-LOADED_MISSING_LOADOUT_DATE = "LOADED_MISSING_LOADOUT_DATE"
-LOADED_MISSING_ACTUAL_COST = "LOADED_MISSING_ACTUAL_COST"
-LOADED_NEGATIVE_MARGIN = "LOADED_NEGATIVE_MARGIN"
-
-# Codes that must never fire against a LOADED line — every rule whose sole
-# purpose is protecting a price that will never be quoted (§5.3, §5.7).
-ACTIVE_ONLY_CODES = frozenset(
-    {
-        NO_DNBP_FACTOR,
-        MISSING_SELL_PRICE,
-        UNKNOWN_SPECIES,
-        MISSING_LIVESTOCK_COST,
-        MISSING_AVG_WEIGHT,
-        RECEIVED_VALUE_MISMATCH,
-        RECEIVED_BENCHMARK_ABSENT,
-        NO_STANDARD_WEIGHT,
-        MARGIN_BUFFER_ERODED,
-        NEGATIVE_MARGIN,
-        DNBP_OUTLIER,
-        LARGE_BENCHMARK_GAP,
-        HAND_SET_VALUE,
-        WEIGHT_OUTLIER,
-    }
-)
-
 # DNBP_OUTLIER threshold (§5.7): "> 15% off recent average". Not
 # Everhealth-config-editable like the DNBP factor table — it's a fixed
 # statistical tripwire on the analysis, not a money-moving lever, so it

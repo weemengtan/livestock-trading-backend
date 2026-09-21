@@ -26,6 +26,7 @@ from models.enums import InviteStatus, Role
 from models.user import User
 from repositories import refresh_tokens as refresh_token_repo
 from repositories import users as user_repo
+from services import audit_service
 
 
 async def check_login_rate_limit(redis: Redis, *, key: str) -> None:
@@ -36,6 +37,19 @@ async def check_login_rate_limit(redis: Redis, *, key: str) -> None:
     await rate_limit.enforce(
         redis, key=f"ratelimit:login:{key}", limit=settings.login_rate_limit_per_minute, window_seconds=60
     )
+
+
+async def record_login_failure(db: AsyncSession, *, email: str, reason: str) -> None:
+    """A failed sign-in is itself a security event. Committed here because the
+    request is about to end in an error and never reaches its own commit."""
+    await audit_service.write(
+        db,
+        actor_id=None,
+        action="auth.login_failed",
+        entity="user",
+        after={"email": email.strip().lower(), "reason": reason},
+    )
+    await db.commit()
 
 
 async def authenticate(db: AsyncSession, *, email: str, password: str, totp_code: str | None) -> tuple[User, Role]:
@@ -98,6 +112,14 @@ async def rotate_refresh_token(db: AsyncSession, *, raw_refresh_token: str) -> t
         # revocation would silently roll back when the session closes —
         # the exact opposite of what this branch exists to guarantee.
         await refresh_token_repo.revoke_family(db, token_family=stored.token_family, revoked_at=now)
+        await audit_service.write(
+            db,
+            actor_id=stored.user_id,
+            action="auth.refresh_token_reuse_detected",
+            entity="user",
+            entity_id=stored.user_id,
+            after={"token_family": str(stored.token_family)},
+        )
         await db.commit()
         raise TokenReused()
 
@@ -132,6 +154,9 @@ async def logout(db: AsyncSession, *, raw_refresh_token: str) -> None:
     stored = await refresh_token_repo.get_by_hash(db, token_hash)
     if stored is not None and stored.revoked_at is None:
         await refresh_token_repo.revoke_family(db, token_family=stored.token_family, revoked_at=datetime.now(UTC))
+        await audit_service.write(
+            db, actor_id=stored.user_id, action="auth.logout", entity="user", entity_id=stored.user_id
+        )
 
 
 def decode_access_token(token: str) -> dict:

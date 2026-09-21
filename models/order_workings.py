@@ -13,12 +13,8 @@ MONEY = Numeric(18, 10)
 
 class OrderWorkings(TimestampedBase):
     """§8 — EVERHEALTH-OWNED, Columns X-AF. Derived only: recomputed freely
-    by re-running POST /snapshots/{id}/calculate, never hand-edited. Exists
-    ONLY for an ACTIVE order_line (§5.3) — enforced at the database level by
-    a partial unique index plus a trigger checking the parent line's
-    lifecycle (see the phase2_ingestion_tables migration), not merely
-    because domain.engine.workings.compute_order_workings returns None for
-    a LOADED line.
+    by re-running POST /snapshots/{id}/calculate, never hand-edited. One row
+    per order line (unique index); every line is an Active Order.
 
     `bing_dnbp_inputs` persists exactly what produced `bing_dnbp` (G,
     species, cif_buffer, factor) so any published price is re-derivable
@@ -32,7 +28,12 @@ class OrderWorkings(TimestampedBase):
         UUID(as_uuid=True), ForeignKey("order_lines.id"), unique=True, index=True
     )
     engine_version: Mapped[str] = mapped_column(String)
-    ref_data_version: Mapped[str] = mapped_column(String)
+    ref_data_version: Mapped[str] = mapped_column(String)  # human-readable label (effective date)
+    # The exact reference-data version this row was computed under. NULL only
+    # on rows written before this column existed.
+    ref_data_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("reference_data_versions.id"), default=None, index=True
+    )
     computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     adjusted_price_per_kg: Mapped[Decimal | None] = mapped_column(MONEY, default=None)  # X

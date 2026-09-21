@@ -37,8 +37,22 @@ from schemas.buyer import (
     ScorecardResponse,
     SpeciesOption,
 )
-from services import buy_entry_service, buy_instruction_service, delivery_service, scorecard_service
+from services import audit_service, buy_entry_service, buy_instruction_service, delivery_service, scorecard_service
 from services.buy_entry_service import BuyEntryInput
+
+# Fields recorded before/after on a buy-entry edit or delete (a financial record).
+_ENTRY_AUDIT_FIELDS = (
+    "pen",
+    "description",
+    "breach_reason",
+    "head_count",
+    "price_per_head",
+    "weight_kg",
+    "implied_price_per_kg",
+    "variance_per_kg",
+    "is_breach",
+    "is_deleted",
+)
 
 router = APIRouter(prefix="/buyer", tags=["buyer"])
 
@@ -195,6 +209,7 @@ async def patch_entry(
     if entry is None or entry.buyer_id != current.user_id or entry.is_deleted:
         raise NotFound("Buy entry")
 
+    before_state = audit_service.state_of(entry, _ENTRY_AUDIT_FIELDS)
     for field in ("pen", "description", "breach_reason", "head_count"):
         value = getattr(body, field)
         if value is not None:
@@ -210,7 +225,7 @@ async def patch_entry(
         # Rescored against the FROZEN dnbp_at_entry, never a re-fetched
         # publication (§12.4's non-negotiable) — this is only correcting a
         # typo in what was bid/weighed, not re-litigating which DNBP applied.
-        close_threshold = get_operational_constants().bid_check_close_threshold_pct
+        close_threshold = (await get_operational_constants(db)).bid_check_close_threshold_pct
         result = score_bid(
             price_per_head=entry.price_per_head,
             weight_kg=entry.weight_kg,
@@ -221,6 +236,15 @@ async def patch_entry(
         entry.variance_per_kg = result.variance_per_kg
         entry.is_breach = result.is_breach
 
+    await audit_service.write(
+        db,
+        actor_id=current.user_id,
+        action="buy_entry.updated",
+        entity="buy_entry",
+        entity_id=entry.id,
+        before=before_state,
+        after=audit_service.state_of(entry, _ENTRY_AUDIT_FIELDS),
+    )
     await db.commit()
     return _to_entry_response(entry)
 
@@ -232,7 +256,17 @@ async def delete_entry(
     entry = await buy_entries_repo.get_by_id(db, entry_id)
     if entry is None or entry.buyer_id != current.user_id:
         raise NotFound("Buy entry")
+    before_state = audit_service.state_of(entry, _ENTRY_AUDIT_FIELDS)
     entry.is_deleted = True
+    await audit_service.write(
+        db,
+        actor_id=current.user_id,
+        action="buy_entry.deleted",
+        entity="buy_entry",
+        entity_id=entry.id,
+        before=before_state,
+        after=audit_service.state_of(entry, _ENTRY_AUDIT_FIELDS),
+    )
     await db.commit()
 
 
@@ -250,7 +284,7 @@ async def instruction_current(
     if instruction is None:
         raise NotFound("Buy instruction")
     lines = await buy_instructions_repo.list_lines(db, instruction.id)
-    saleyard_entry = resolve_saleyard_for_date(instruction.trade_date, get_saleyard_calendar())
+    saleyard_entry = resolve_saleyard_for_date(instruction.trade_date, await get_saleyard_calendar(db))
     return InstructionResponse(
         instruction_id=str(instruction.id),
         instruction_no=instruction.instruction_no,

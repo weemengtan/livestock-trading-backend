@@ -2,23 +2,26 @@
 
 Never map by column letter or fixed cell address. A sheet's header row is
 located by scanning for known header tokens, and each column is mapped to a
-field name by normalising its header text and matching it against a synonym
-registry — verified against both real workbooks, where the same field lands
-on different letters (the benchmark column is `T` in one file, `S` in the
-other) and even the header row index differs (7 vs 4).
+field name by normalising its header text and matching it against the
+contract's synonym registry — verified against the real workbooks, where the
+same field lands on different letters (the benchmark column is `T` in one
+file, `S` in the other) and even the header row index differs (7 vs 4).
+
+The accepted spellings live in the ingestion contract (versioned config in
+Postgres), not here: a renamed header is a new contract version, not a code
+change. `DEFAULT_HEADER_SYNONYMS` below is the baseline the first contract
+was seeded with (and the test baseline); `PARSED_FIELDS` is the closed set of
+fields the parser knows how to read.
 """
 
 import re
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
-MAX_HEADER_SCAN_ROWS = 20
-MIN_HEADER_MATCHES = 6
-
 # field name -> set of normalised header texts that map to it. Extended
-# beyond PRD §7.2's sketch with every header actually observed in the two
-# supplied workbooks (see domain/ingestion — verified by opening both files
-# with openpyxl in both data_only modes).
-SYNONYMS: dict[str, frozenset[str]] = {
+# beyond PRD §7.2's sketch with every header actually observed in the
+# supplied workbooks. Baseline only — the runtime uses the active contract's.
+DEFAULT_HEADER_SYNONYMS: dict[str, frozenset[str]] = {
     "contract_no": frozenset({"row labels", "contract no", "contract no.", "order number"}),
     "customer_name": frozenset({"customer name"}),
     "species": frozenset({"type", "species"}),
@@ -81,15 +84,37 @@ def tokenize(text: object) -> frozenset[str]:
     return frozenset(normalise(text).split())
 
 
-_HEADER_LOOKUP: dict[str, str] = {synonym: field for field, synonyms in SYNONYMS.items() for synonym in synonyms}
+# The closed set of fields the parser can read (a new one is a code change).
+PARSED_FIELDS = frozenset(DEFAULT_HEADER_SYNONYMS)
 
 
-def map_header_cell(text: object) -> str | None:
+class AmbiguousHeaderError(ValueError):
+    """The same header text is listed for two different fields."""
+
+
+def build_header_lookup(synonyms: Mapping[str, Iterable[str]]) -> dict[str, str]:
+    """normalised header text -> field name. A header that maps to two fields
+    would make a column's meaning depend on dict order, so it is rejected."""
+    lookup: dict[str, str] = {}
+    for field_name, spellings in synonyms.items():
+        for spelling in spellings:
+            key = normalise(spelling)
+            if not key:
+                continue
+            if key in lookup and lookup[key] != field_name:
+                raise AmbiguousHeaderError(
+                    f"'{spelling}' is listed for both '{lookup[key]}' and '{field_name}'."
+                )
+            lookup[key] = field_name
+    return lookup
+
+
+def map_header_cell(text: object, lookup: Mapping[str, str]) -> str | None:
     """Field name for one header cell's text, or None if unrecognised. An
     unrecognised header is not an error — it's a column this system doesn't
     need (or a future column); the row can still be a valid header row via
     the other cells."""
-    return _HEADER_LOOKUP.get(normalise(text))
+    return lookup.get(normalise(text))
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,32 +125,34 @@ class HeaderRow:
 
 
 def find_header_row(
-    sheet, *, start_row: int = 1, max_scan_rows: int = MAX_HEADER_SCAN_ROWS
+    sheet,
+    lookup: Mapping[str, str],
+    *,
+    min_matches: int,
+    max_scan_rows: int,
+    start_row: int = 1,
 ) -> HeaderRow | None:
     """Scan up to `max_scan_rows` rows of `sheet` starting at `start_row`
     (an openpyxl worksheet opened with data_only=True — header text is never
-    a formula) for a row whose cells match >= MIN_HEADER_MATCHES
-    synonym-registry entries. Returns the best-matching row in that window,
-    or None if no row qualifies. `start_row` lets a caller re-scan for a
-    second, re-declared header row below a LOADED-section marker, which the
-    real files do (§7.2 pt 3) rather than repeating the ACTIVE header."""
+    a formula) for a row whose cells match >= `min_matches` entries of the
+    contract's header lookup. Returns the best-matching row in that window,
+    or None if no row qualifies."""
     best: HeaderRow | None = None
     last_row = min(start_row + max_scan_rows - 1, sheet.max_row)
     for row_idx in range(start_row, last_row + 1):
         column_map: dict[int, str] = {}
         seen_fields: set[str] = set()
         for col_idx in range(1, sheet.max_column + 1):
-            field = map_header_cell(sheet.cell(row=row_idx, column=col_idx).value)
-            # First occurrence wins. The 07-08 file's own X-AF "workings
-            # echo" block re-uses identical header text for several columns
-            # ("Average of Price AUD" appears at both G and X, "Pack Cost"
-            # at both M and Y, ...) — the received A-V column always comes
-            # first (§1.2's ownership boundary is A-V *then* X-AF), so a
-            # later duplicate is the workings echo, never the source value,
-            # and must not overwrite the real mapping.
+            field = map_header_cell(sheet.cell(row=row_idx, column=col_idx).value, lookup)
+            # First occurrence wins. Some files carry a "workings echo" block
+            # that re-uses identical header text for several columns
+            # ("Average of Price AUD" appears at both G and X, "Pack Cost" at
+            # both M and Y, ...) — the received block always comes first, so
+            # a later duplicate is the echo, never the source value, and must
+            # not overwrite the real mapping.
             if field is not None and field not in seen_fields:
                 column_map[col_idx] = field
                 seen_fields.add(field)
-        if len(column_map) >= MIN_HEADER_MATCHES and (best is None or len(column_map) > best.match_count):
+        if len(column_map) >= min_matches and (best is None or len(column_map) > best.match_count):
             best = HeaderRow(row_index=row_idx, column_map=column_map, match_count=len(column_map))
     return best

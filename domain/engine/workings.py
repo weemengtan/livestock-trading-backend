@@ -4,18 +4,14 @@
 independent expressions from `compute_bing_dnbp`'s result, never by reaching
 into its internals, so a fault in one cannot corrupt the other (§5.3).
 
-Only ACTIVE lines get a workings row and the §5.7 rule set (§5.3, §5.7). A
-LOADED line runs the separate, much smaller §5.7.1 rule set and gets no
-workings row at all — these are two separate functions below, not one path
-branching on severity, so a LOADED line structurally cannot trip a
-DNBP-protecting rule.
+Every line the system holds is an Active Order (the upload reads nothing
+else), so every line gets a workings row and the §5.7 rule set.
 
 Every division here is guarded per §5.5: a missing/zero divisor yields None
 for that derived field plus a validation issue — never a raised exception,
 never NaN/Inf.
 """
 
-import enum
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -25,14 +21,6 @@ from domain.engine.dnbp import compute_bing_dnbp
 from domain.engine.issues import Severity, ValidationIssue
 
 
-class Lifecycle(enum.StrEnum):
-    """Genuinely closed (PRD §6.9's closed_enums list) — unlike species and
-    product_type, which must never be enums."""
-
-    ACTIVE = "ACTIVE"
-    LOADED = "LOADED"
-
-
 @dataclass(frozen=True, slots=True)
 class OrderLineInput:
     """The subset of received columns A-V (§5.1) the engine and its
@@ -40,7 +28,6 @@ class OrderLineInput:
     (§6.9), never a closed type."""
 
     species: str
-    lifecycle: Lifecycle = Lifecycle.ACTIVE
     contract_no: str | None = None
     avg_price_aud: Decimal | None = None
     incoterm: str | None = None
@@ -51,7 +38,6 @@ class OrderLineInput:
     avg_weight_kg: Decimal | None = None
     mom_ph: Decimal | None = None
     dnbp_benchmark: Decimal | None = None
-    loadout_date: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,11 +60,9 @@ class OrderWorkings:
 
 def compute_order_workings(
     line: OrderLineInput, config: EverhealthConfig
-) -> tuple[OrderWorkings | None, list[ValidationIssue]]:
-    """Entry point. LOADED lines never reach the ACTIVE rule set or produce
-    a workings row (§5.3) — the buyer already bought them."""
-    if line.lifecycle is Lifecycle.LOADED:
-        return None, _compute_loaded_line_issues(line)
+) -> tuple[OrderWorkings, list[ValidationIssue]]:
+    """Entry point: the isolated `AC`, the supporting X-AF workings and the
+    §5.7 rule set for one Active Order line."""
     return _compute_active_line_workings(line, config)
 
 
@@ -226,38 +210,6 @@ def _compute_active_line_workings(
         supporting_analysis_complete=supporting_analysis_complete,
     )
     return workings, found_issues
-
-
-def _compute_loaded_line_issues(line: OrderLineInput) -> list[ValidationIssue]:
-    """§5.7.1 — P/L analysis only. Nothing here concerns pricing and nothing
-    here blocks. None of the ACTIVE rule checks above are reachable from
-    this function."""
-    found_issues: list[ValidationIssue] = []
-
-    if line.loadout_date is None:
-        found_issues.append(
-            ValidationIssue(
-                codes.LOADED_MISSING_LOADOUT_DATE,
-                Severity.WARN,
-                "Loaded order has no loadout date — excluded from period P/L",
-            )
-        )
-
-    if line.expected_livestock_cost_per_kg is None:
-        found_issues.append(
-            ValidationIssue(
-                codes.LOADED_MISSING_ACTUAL_COST, Severity.WARN, "No livestock cost — excluded from realised margin"
-            )
-        )
-
-    if line.mom_ph is not None and line.mom_ph < 0:
-        found_issues.append(
-            ValidationIssue(
-                codes.LOADED_NEGATIVE_MARGIN, Severity.INFO, "Loaded order shows a negative margin over materials"
-            )
-        )
-
-    return found_issues
 
 
 def is_publishable(found_issues: list[ValidationIssue]) -> bool:

@@ -64,7 +64,7 @@ async def create_or_sync_entry(
     if line is None:
         raise Conflict("SPECIES_NOT_PUBLISHED", f"No published Do Not Buy Price for {payload.species} at that time.")
 
-    close_threshold = get_operational_constants().bid_check_close_threshold_pct
+    close_threshold = (await get_operational_constants(db)).bid_check_close_threshold_pct
     result = score_bid(
         price_per_head=payload.price_per_head,
         weight_kg=payload.weight_kg,

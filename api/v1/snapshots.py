@@ -9,9 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.deps import CurrentUser, redis_dep, require_role
 from core.db import get_db
 from core.errors import Conflict, NotFound
-from core.object_storage import ObjectStorage, get_object_storage
 from domain.engine.issues import Severity
-from domain.engine.workings import Lifecycle
 from models.enums import Role, SnapshotStatus
 from repositories import order_lines as order_lines_repo
 from repositories import order_snapshots as order_snapshots_repo
@@ -21,11 +19,13 @@ from schemas.order_lines import OrderLineResponse, OrderWorkingsResponse
 from schemas.snapshots import (
     CalculateResponse,
     CommitSnapshotRequest,
+    IngestionContractResponse,
     IssueResponse,
     SnapshotResponse,
     UploadPreviewResponse,
 )
 from services import audit_service, calculate_service, ingestion_service, issue_acknowledgment_service
+from services.ingestion_contract_service import get_active_contract
 
 router = APIRouter(prefix="/snapshots", tags=["snapshots"])
 
@@ -34,16 +34,11 @@ router = APIRouter(prefix="/snapshots", tags=["snapshots"])
 _trading_console = require_role(Role.OWNER, Role.ACCOUNTANT)
 
 
-def _storage_dep() -> ObjectStorage:
-    return get_object_storage()
-
-
 def _to_line_response(line) -> OrderLineResponse:
     return OrderLineResponse(
         id=line.id,
         snapshot_id=line.snapshot_id,
         line_no=line.line_no,
-        lifecycle=line.lifecycle.value,
         contract_no=line.contract_no,
         customer_name=line.customer_name,
         species=line.species,
@@ -77,6 +72,15 @@ async def _get_owned_snapshot(db: AsyncSession, snapshot_id: uuid.UUID, org_id: 
     return snapshot
 
 
+@router.get("/ingestion-contract", response_model=IngestionContractResponse)
+async def get_ingestion_contract(
+    current: CurrentUser = Depends(_trading_console), db: AsyncSession = Depends(get_db)
+) -> IngestionContractResponse:
+    # Declared before the `/{snapshot_id}` route so it is not captured as an id.
+    contract = await get_active_contract(db)
+    return IngestionContractResponse(version=contract.version, required_sheet_name=contract.required_sheet_name)
+
+
 @router.post("/upload", response_model=UploadPreviewResponse)
 async def upload(
     file: UploadFile = File(...),
@@ -97,10 +101,9 @@ async def commit(
     current: CurrentUser = Depends(_trading_console),
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(redis_dep),
-    storage: ObjectStorage = Depends(_storage_dep),
 ) -> SnapshotResponse:
     snapshot = await ingestion_service.commit_snapshot(
-        db, redis, storage, org_id=current.org_id, uploaded_by=current.user_id, preview_id=body.preview_id
+        db, redis, org_id=current.org_id, uploaded_by=current.user_id, preview_id=body.preview_id
     )
     await db.commit()
     return SnapshotResponse.model_validate(snapshot)
@@ -137,13 +140,12 @@ async def diff(
 @router.get("/{snapshot_id}/lines", response_model=list[OrderLineResponse])
 async def list_lines(
     snapshot_id: uuid.UUID,
-    lifecycle: Lifecycle | None = Query(default=None),
     species: str | None = Query(default=None),
     current: CurrentUser = Depends(_trading_console),
     db: AsyncSession = Depends(get_db),
 ) -> list[OrderLineResponse]:
     await _get_owned_snapshot(db, snapshot_id, current.org_id)
-    lines = await order_lines_repo.list_by_snapshot(db, snapshot_id, lifecycle=lifecycle, species=species)
+    lines = await order_lines_repo.list_by_snapshot(db, snapshot_id, species=species)
     return [_to_line_response(line) for line in lines]
 
 

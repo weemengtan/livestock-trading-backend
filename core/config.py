@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -50,28 +52,16 @@ class Settings(BaseSettings):
     # needs no re-enrollment.
     mfa_enforcement_enabled: bool = True
 
-    # Phase 2 — original-file retention (§7.2 pt 9, §8). "local" is the
-    # documented local-dev/CI stand-in (backend/.docker-data/objects/,
-    # already gitignored); "s3" is the real answer for the Railway
-    # deployment, which has no native blob storage — point it at any
-    # S3-compatible bucket (Cloudflare R2, Backblaze B2, self-hosted MinIO,
-    # or AWS S3 itself) via boto3, which is Apache-2.0/FOSS regardless of
-    # which of those the bucket actually is.
-    object_storage_backend: str = "local"
-    object_storage_local_dir: str = ".docker-data/objects"
-    object_storage_bucket: str = "livestock-order-snapshots"
-    object_storage_endpoint_url: str | None = None
-    object_storage_region: str = "auto"
-    object_storage_access_key_id: str = ""
-    object_storage_secret_access_key: str = ""
+    # "dev" | "test" | "prod". Defaults to the safe choice: destructive
+    # developer tooling (scripts/wipe_business_data.py) refuses to run unless
+    # this is explicitly "dev". Local .env sets ENVIRONMENT=dev.
+    environment: Literal["dev", "test", "prod"] = "prod"
 
-    # Phase 2 — where EverhealthConfig loads its seed values from (§6).
-    # Defaults to backend/fixtures/reference-data-seed.json (vendored —
-    # see backend/fixtures/README.md for why); override only for a
-    # genuinely different seed source (e.g. a test fixture), which is why
-    # this stays a setting rather than a hardcoded path in
-    # domain/engine/config.py itself.
-    reference_data_seed_path: str | None = None
+    # §6.5 separation of duties: a reference-data version can only be
+    # activated by someone other than the person who created it. Defaults to
+    # True (the secure choice); local dev/CI set this False so one person
+    # can exercise the whole propose -> preview -> activate flow alone.
+    reference_data_four_eyes_required: bool = True
 
     # Ephemeral parse-preview cache TTL (§7.3's upload -> preview -> commit
     # flow) — long enough for Bing to review a preview before confirming.

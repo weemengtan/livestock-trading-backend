@@ -4,29 +4,15 @@ Revision ID: 4011983f89e6
 Revises: 1a0dff07b31d
 Create Date: 2026-09-08 12:15:57.771977
 
-Includes a data migration seeding the first reference_data_versions row (and
-species_registry/product_type_registry rows) from
-fixtures/reference-data-seed.json — the exact values Phase 1-3 already had
-live via core.reference_data's static JSON loader. This is a continuity
-migration, not a business change: cif_buffer/dnbp_factor/standard_weight
-keep their current values, `is_active=True` immediately so
-get_active_everhealth_config finds a version on first read, and
-`impact_previewed_at` is stamped at migration time since there is no
-meaningful "before" state to preview a value that has already been live
-since Phase 1 against (§6.5's impact-preview gate protects a *future*
-change, not the data's own introduction).
-
-fixtures/ is vendored inside backend/ (Phase 5 — see backend/fixtures/
-README.md) so this migration is reproducible from a bare checkout; it
-previously reached one level above backend/ into a shared, untracked
-folder, which meant `alembic upgrade head` could never actually complete
-in CI.
+Creates the reference-data and registry tables and seeds the two OPEN
+registries (species, product types) with generic starting rows. It does NOT
+seed any DNBP parameters: the CIF buffer, DNBP factors and standard weights
+are business-confidential, so a new database has no reference-data version
+until an operator creates one (scripts/seed_reference_data.py --file <path>
+for a dev database, or the Reference Data screen). The app reports
+NO_ACTIVE_REFERENCE_DATA until then.
 """
-import json
-import uuid
-from datetime import UTC, date, datetime
-from decimal import Decimal
-from pathlib import Path
+from datetime import UTC, datetime
 from typing import Sequence, Union
 
 from alembic import op
@@ -40,95 +26,12 @@ down_revision: Union[str, None] = '1a0dff07b31d'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
-_SEED_PATH = Path(__file__).resolve().parents[2] / "fixtures" / "reference-data-seed.json"
+# Open registries (PRD 6.9): a starting set, not a limit — admin-managed at runtime.
+_SPECIES = ["SHEEP", "LAMB", "GOAT", "VEAL", "MUTTON"]
+_PRODUCT_TYPES = ["CCS", "6 WAY", "FULL BONE"]
 
 
-def _load_seed() -> dict:
-    return json.loads(_SEED_PATH.read_text())
-
-
-def _seed_reference_data(data: dict) -> None:
-    everhealth = data["everhealth"]
-    effective_from = datetime.combine(date.fromisoformat(data["effective_from"]), datetime.min.time(), tzinfo=UTC)
-    now = datetime.now(UTC)
-    version_id = str(uuid.uuid4())
-
-    versions_table = sa.table(
-        "reference_data_versions",
-        sa.column("id", sa.UUID()),
-        sa.column("effective_from", sa.DateTime(timezone=True)),
-        sa.column("created_by", sa.UUID()),
-        sa.column("note", sa.String()),
-        sa.column("is_active", sa.Boolean()),
-        sa.column("activated_at", sa.DateTime(timezone=True)),
-        sa.column("impact_previewed_at", sa.DateTime(timezone=True)),
-        sa.column("created_at", sa.DateTime(timezone=True)),
-        sa.column("updated_at", sa.DateTime(timezone=True)),
-    )
-    op.bulk_insert(
-        versions_table,
-        [
-            {
-                "id": version_id,
-                "effective_from": effective_from,
-                "created_by": None,
-                "note": "Seeded from fixtures/reference-data-seed.json at migration time (Phase 3b) — "
-                "continuity migration, not a business change.",
-                "is_active": True,
-                "activated_at": now,
-                "impact_previewed_at": now,
-                "created_at": now,
-                "updated_at": now,
-            }
-        ],
-    )
-
-    entries_table = sa.table(
-        "reference_data_entries",
-        sa.column("id", sa.UUID()),
-        sa.column("version_id", sa.UUID()),
-        sa.column(
-            "table_key",
-            postgresql.ENUM(
-                "CIF_BUFFER_PER_KG",
-                "DNBP_FACTOR",
-                "STANDARD_WEIGHT",
-                name="reference_data_table_key",
-                create_type=False,
-            ),
-        ),
-        sa.column("key1", sa.String()),
-        sa.column("key2", sa.String()),
-        sa.column("value", sa.Numeric(18, 10)),
-        sa.column("created_at", sa.DateTime(timezone=True)),
-        sa.column("updated_at", sa.DateTime(timezone=True)),
-    )
-
-    def _entry(table_key: str, key1: str | None, value) -> dict:
-        return {
-            "id": str(uuid.uuid4()),
-            "version_id": version_id,
-            "table_key": table_key,
-            "key1": key1,
-            "key2": None,
-            "value": Decimal(str(value)),
-            "created_at": now,
-            "updated_at": now,
-        }
-
-    entries = [_entry("CIF_BUFFER_PER_KG", None, everhealth["cif_buffer_per_kg"]["value"])]
-    entries += [
-        _entry("DNBP_FACTOR", species, factor)
-        for species, factor in everhealth["dnbp_factor_by_species"]["values"].items()
-    ]
-    entries += [
-        _entry("STANDARD_WEIGHT", species, weight)
-        for species, weight in everhealth["standard_weight_by_species"]["values"].items()
-    ]
-    op.bulk_insert(entries_table, entries)
-
-
-def _seed_registries(data: dict) -> None:
+def _seed_registries() -> None:
     now = datetime.now(UTC)
 
     species_table = sa.table(
@@ -151,7 +54,7 @@ def _seed_registries(data: dict) -> None:
                 "created_at": now,
                 "updated_at": now,
             }
-            for code in data["open_registries"]["species"]["seed_rows"]
+            for code in _SPECIES
         ],
     )
 
@@ -175,7 +78,7 @@ def _seed_registries(data: dict) -> None:
                 "created_at": now,
                 "updated_at": now,
             }
-            for code in data["open_registries"]["product_type"]["seed_rows"]
+            for code in _PRODUCT_TYPES
         ],
     )
 
@@ -248,9 +151,7 @@ def upgrade() -> None:
     op.create_index(op.f('ix_reference_data_entries_version_id'), 'reference_data_entries', ['version_id'], unique=False)
     # ### end Alembic commands ###
 
-    seed = _load_seed()
-    _seed_reference_data(seed)
-    _seed_registries(seed)
+    _seed_registries()
 
 
 def downgrade() -> None:

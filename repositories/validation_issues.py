@@ -3,7 +3,6 @@ import uuid
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from domain.engine.workings import Lifecycle
 from models.order_line import OrderLine
 from models.validation_issue import ValidationIssueRecord
 
@@ -27,20 +26,6 @@ async def list_by_snapshot(db: AsyncSession, snapshot_id: uuid.UUID) -> list[Val
         select(ValidationIssueRecord)
         .join(OrderLine, OrderLine.id == ValidationIssueRecord.order_line_id)
         .where(OrderLine.snapshot_id == snapshot_id)
-    )
-    return list(result.scalars().all())
-
-
-async def list_active_by_snapshot(db: AsyncSession, snapshot_id: uuid.UUID) -> list[ValidationIssueRecord]:
-    """Scoped to lifecycle=ACTIVE (§5.3, §5.7) — used by
-    services/publication_service.py's publish gate. "No loaded-line issue
-    can ever gate a publication" (§5.7) means the gate must never see a
-    LOADED line's issues at all, not merely rely on their severity never
-    being BLOCK."""
-    result = await db.execute(
-        select(ValidationIssueRecord)
-        .join(OrderLine, OrderLine.id == ValidationIssueRecord.order_line_id)
-        .where(OrderLine.snapshot_id == snapshot_id, OrderLine.lifecycle == Lifecycle.ACTIVE)
     )
     return list(result.scalars().all())
 

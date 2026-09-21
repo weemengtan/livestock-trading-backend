@@ -3,10 +3,8 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from domain.engine.workings import Lifecycle
 from models.order_line import OrderLine
 from models.order_workings import OrderWorkings
-
 
 # §8's order_workings column list — the fields calculate_snapshot actually
 # computes. Deliberately an allowlist, not "every column except id/
@@ -17,6 +15,7 @@ from models.order_workings import OrderWorkings
 COMPUTED_COLUMNS = (
     "engine_version",
     "ref_data_version",
+    "ref_data_version_id",
     "computed_at",
     "adjusted_price_per_kg",
     "pack_cost_per_kg",
@@ -61,7 +60,7 @@ async def list_by_snapshot_id(db: AsyncSession, snapshot_id: uuid.UUID) -> list[
     result = await db.execute(
         select(OrderWorkings)
         .join(OrderLine, OrderWorkings.order_line_id == OrderLine.id)
-        .where(OrderLine.snapshot_id == snapshot_id, OrderLine.lifecycle == Lifecycle.ACTIVE)
+        .where(OrderLine.snapshot_id == snapshot_id)
     )
     return list(result.scalars().all())
 
@@ -76,7 +75,6 @@ async def list_active_with_bing_dnbp(db: AsyncSession, snapshot_id: uuid.UUID) -
         .join(OrderWorkings, OrderWorkings.order_line_id == OrderLine.id)
         .where(
             OrderLine.snapshot_id == snapshot_id,
-            OrderLine.lifecycle == Lifecycle.ACTIVE,
             OrderWorkings.bing_dnbp.is_not(None),
         )
     )

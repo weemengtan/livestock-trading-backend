@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -58,9 +59,12 @@ async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
 async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
     # Keeps every error response on one envelope shape (§9), including
     # Pydantic's own 422s, not just the ones this codebase raises itself.
+    # A model-level validator's error carries the raw exception in `ctx`,
+    # which is not JSON-serialisable — render any exception as its message.
+    details = jsonable_encoder(exc.errors(), custom_encoder={Exception: str})
     return JSONResponse(
         status_code=422,
-        content={"error": {"code": "VALIDATION_ERROR", "message": "Invalid request.", "details": exc.errors()}},
+        content={"error": {"code": "VALIDATION_ERROR", "message": "Invalid request.", "details": details}},
     )
 
 

@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ReferenceDataEntryInput(BaseModel):
@@ -13,20 +13,40 @@ class ReferenceDataEntryInput(BaseModel):
 
     table_key: str
     key1: str | None = None
+    key2: str | None = None
     value: Decimal
+    text_value: str | None = None
+
+
+class ReferenceDataKeyRef(BaseModel):
+    """Identifies one keyed entry to remove from the new version."""
+
+    table_key: str
+    key1: str | None = None
+    key2: str | None = None
 
 
 class CreateVersionRequest(BaseModel):
     effective_from: datetime
     note: str | None = None
-    entries: list[ReferenceDataEntryInput] = Field(min_length=1)
+    model_type: str | None = None  # omitted = keep the active version's model
+    entries: list[ReferenceDataEntryInput] = Field(default_factory=list)
+    removals: list[ReferenceDataKeyRef] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _needs_a_change(self) -> "CreateVersionRequest":
+        if not self.entries and not self.removals and self.model_type is None:
+            raise ValueError("A version needs at least one entry, removal or model change.")
+        return self
 
 
 class ReferenceDataEntryResponse(BaseModel):
     id: uuid.UUID
     table_key: str
     key1: str | None
+    key2: str | None
     value: Decimal
+    text_value: str | None
 
     model_config = {"from_attributes": True}
 
@@ -36,8 +56,10 @@ class ReferenceDataVersionResponse(BaseModel):
     effective_from: datetime
     created_by: uuid.UUID | None
     note: str | None
+    model_type: str
     is_active: bool
     activated_at: datetime | None
+    activated_by: uuid.UUID | None
     impact_previewed_at: datetime | None
     created_at: datetime
 
@@ -48,14 +70,28 @@ class ReferenceDataVersionDetailResponse(ReferenceDataVersionResponse):
     entries: list[ReferenceDataEntryResponse]
 
 
+class SaleyardCalendarRow(BaseModel):
+    saleyard: str
+    day: str
+    prepayment_aud: Decimal
+    note: str | None
+
+
 class ActiveConfigResponse(BaseModel):
     """§9.8 `GET /reference-data/active` — both halves, labelled by owner
     (§11.7's framing: which panel is editable, which is read-only)."""
 
     ref_data_version: str
+    ref_data_version_id: str | None
+    model_type: str
+    available_model_types: list[str]
     cif_buffer_per_kg: Decimal
     dnbp_factor_by_species: dict[str, Decimal]
     standard_weight_by_species: dict[str, Decimal]
+    bid_check_close_threshold_pct: Decimal
+    buyer_weight_band_tolerance_pct: Decimal
+    stale_instruction_hours: int
+    saleyard_calendar: list["SaleyardCalendarRow"]
     owner: str = "EVERHEALTH"
 
 
@@ -73,6 +109,7 @@ class ImpactPreviewResponse(BaseModel):
     lines: list[ImpactLineResponse]
     aggregate_exposure_delta_aud: Decimal
     lines_affected: int
+    lines_unpriced: int
 
 
 class SpeciesResponse(BaseModel):
@@ -100,27 +137,3 @@ class CreateProductTypeRequest(BaseModel):
     code: str
     display_name: str
 
-
-class AbattoirTablesResponse(BaseModel):
-    """§9.8 `GET /reference-data/abattoir` — the latest snapshot's stored
-    tables, read-only (§6.1-6.3, §6.6, §11.7)."""
-
-    snapshot_id: uuid.UUID
-    source_filename: str
-    pack_cost_by_product_type: dict[str, Decimal]
-    offal_return_ph_by_species: dict[str, Decimal]
-    skin_return_ph_by_species: dict[str, Decimal]
-
-
-class DriftResponse(BaseModel):
-    id: uuid.UUID
-    snapshot_id: uuid.UUID
-    table_key: str
-    key1: str
-    old_value: Decimal | None
-    new_value: Decimal | None
-    detected_at: datetime
-    acknowledged_by: uuid.UUID | None
-    acknowledged_at: datetime | None
-
-    model_config = {"from_attributes": True}

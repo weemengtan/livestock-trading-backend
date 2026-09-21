@@ -75,7 +75,7 @@ class PublicationLineDraft:
 
 async def compute_publication_lines(db: AsyncSession, snapshot_id: uuid.UUID) -> list[PublicationLineDraft]:
     config = await get_active_everhealth_config(db)
-    tolerance_pct = get_operational_constants().buyer_weight_band_tolerance_pct
+    tolerance_pct = (await get_operational_constants(db)).buyer_weight_band_tolerance_pct
 
     by_species: dict[str, list] = {}
     for line, workings in await order_workings_repo.list_active_with_bing_dnbp(db, snapshot_id):
@@ -122,7 +122,7 @@ def _prices_changed(previous_lines: list[DnbpPublicationLine], drafts: list[Publ
 
 
 async def _assert_publishable(db: AsyncSession, snapshot_id: uuid.UUID) -> None:
-    active_issues = await validation_issues_repo.list_active_by_snapshot(db, snapshot_id)
+    active_issues = await validation_issues_repo.list_by_snapshot(db, snapshot_id)
 
     blocked = [str(issue.order_line_id) for issue in active_issues if issue.severity is Severity.BLOCK]
     if blocked:
