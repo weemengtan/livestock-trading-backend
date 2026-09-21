@@ -30,8 +30,20 @@ from schemas.market_intel import (
     MarketObservationPatchRequest,
     MarketObservationResponse,
 )
-from services import market_observation_service
+from services import audit_service, market_observation_service
 from services.market_observation_service import MarketObservationInput
+
+_OBSERVATION_AUDIT_FIELDS = (
+    "competitor_name",
+    "pen",
+    "description",
+    "head_count",
+    "is_estimated",
+    "price_per_head",
+    "weight_kg",
+    "implied_price_per_kg",
+    "is_deleted",
+)
 
 router = APIRouter(prefix="/market-intel", tags=["market-intel"])
 
@@ -117,6 +129,7 @@ async def patch_observation(
     if observation is None or observation.observer_id != current.user_id or observation.is_deleted:
         raise NotFound("Market observation")
 
+    before_state = audit_service.state_of(observation, _OBSERVATION_AUDIT_FIELDS)
     for field in ("competitor_name", "pen", "description", "head_count", "is_estimated"):
         value = getattr(body, field)
         if value is not None:
@@ -132,6 +145,15 @@ async def patch_observation(
             observation.price_per_head / observation.weight_kg if observation.weight_kg else None
         )
 
+    await audit_service.write(
+        db,
+        actor_id=current.user_id,
+        action="market_observation.updated",
+        entity="market_observation",
+        entity_id=observation.id,
+        before=before_state,
+        after=audit_service.state_of(observation, _OBSERVATION_AUDIT_FIELDS),
+    )
     await db.commit()
     return _to_ack(observation)
 
@@ -143,7 +165,17 @@ async def delete_observation(
     observation = await market_observations_repo.get_by_id(db, observation_id)
     if observation is None or observation.observer_id != current.user_id:
         raise NotFound("Market observation")
+    before_state = audit_service.state_of(observation, _OBSERVATION_AUDIT_FIELDS)
     observation.is_deleted = True
+    await audit_service.write(
+        db,
+        actor_id=current.user_id,
+        action="market_observation.deleted",
+        entity="market_observation",
+        entity_id=observation.id,
+        before=before_state,
+        after=audit_service.state_of(observation, _OBSERVATION_AUDIT_FIELDS),
+    )
     await db.commit()
 
 

@@ -8,9 +8,13 @@ correction requests, DNBP publications
 (+ lines + deliveries), buy instructions (+ lines + fills), buy entries,
 and the audit log.
 
-Keeps: organisations, users, reference_data_versions/entries and the open
-registries — nothing about who can log in or how the DNBP engine is
-configured is touched.
+Keeps: organisations, users and sessions, reference-data versions/entries,
+the open registries and the ingestion contracts — nothing about who can log
+in or how the DNBP engine and uploads are configured is touched.
+
+DEV ONLY: refuses to run unless ENVIRONMENT=dev. The audit log is normally
+append-only (a database trigger); this script, run as the table owner,
+disables the truncate trigger, wipes, and re-arms it in one transaction.
 
 Run with:      uv run python -m scripts.wipe_business_data
 Non-interactive (skips the confirmation prompt): add --yes
@@ -46,14 +50,44 @@ _WIPE_TABLES = [
     "audit_log",
 ]
 
+# Accounts and configuration. Every table in the schema must be listed in
+# exactly one of _WIPE_TABLES / _KEPT_TABLES (tests/test_wipe_script.py fails
+# otherwise), so a new table forces a decision here.
 _KEPT_TABLES = [
     "organisations",
     "users",
+    "user_roles",
+    "refresh_tokens",
+    "push_subscriptions",
     "reference_data_versions",
     "reference_data_entries",
     "species_registry",
     "product_type_registry",
+    "ingestion_contracts",
 ]
+
+
+def assert_dev_environment() -> None:
+    """Destructive: refuse to run anywhere but an explicitly-dev environment
+    (ENVIRONMENT=dev, default prod). In production the app's DB role also
+    lacks the privileges this needs — see scripts/create_app_role.sql."""
+    if settings.environment != "dev":
+        raise SystemExit(
+            f"Refusing to wipe: ENVIRONMENT is '{settings.environment}', not 'dev'. "
+            "This tool exists only for local development databases."
+        )
+
+
+async def truncate_business_tables(session: AsyncSession) -> None:
+    """audit_log is append-only (a trigger rejects UPDATE/DELETE/TRUNCATE
+    even for its owner). Wiping a dev database is the one sanctioned
+    exception: the table owner disables the truncate trigger, truncates, and
+    re-enables it, all inside one transaction — so a failure anywhere leaves
+    the trigger enabled and nothing wiped. A role that does not own the
+    table (the production app role) cannot do this."""
+    await session.execute(text("ALTER TABLE audit_log DISABLE TRIGGER audit_log_no_truncate"))
+    await session.execute(text(f"TRUNCATE TABLE {', '.join(_WIPE_TABLES)} CASCADE"))
+    await session.execute(text("ALTER TABLE audit_log ENABLE TRIGGER audit_log_no_truncate"))
 
 
 async def _counts(session: AsyncSession, tables: list[str]) -> dict[str, int]:
@@ -73,6 +107,7 @@ def _print_counts(title: str, counts: dict[str, int]) -> None:
 
 
 async def main(*, skip_confirm: bool) -> None:
+    assert_dev_environment()
     async with async_session_factory() as session:
         before = await _counts(session, _WIPE_TABLES)
         kept = await _counts(session, _KEPT_TABLES)
@@ -93,7 +128,7 @@ async def main(*, skip_confirm: bool) -> None:
                 print("Aborted — nothing was changed.")
                 return
 
-        await session.execute(text(f"TRUNCATE TABLE {', '.join(_WIPE_TABLES)} CASCADE"))
+        await truncate_business_tables(session)
         await session.commit()
 
         after = await _counts(session, _WIPE_TABLES)

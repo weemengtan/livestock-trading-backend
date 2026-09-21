@@ -16,6 +16,8 @@ from contextvars import ContextVar
 from starlette.requests import Request
 from starlette.responses import Response
 
+from core.request_context import client_ip_var
+
 _REQUEST_ID_HEADER = "X-Request-Id"
 
 correlation_id_var: ContextVar[str] = ContextVar("correlation_id", default="-")
@@ -29,6 +31,13 @@ async def correlation_id_middleware(request: Request, call_next: CallNext) -> Re
     incoming = request.headers.get(_REQUEST_ID_HEADER)
     correlation_id = incoming if incoming else str(uuid.uuid4())
     token = correlation_id_var.set(correlation_id)
+    # Same source as the rate limiter (api/deps.py client_ip): the first
+    # X-Forwarded-For hop when present, else the peer address. Behind an
+    # untrusted proxy that header is caller-controlled, so this is a best
+    # effort record of origin, not proof of it.
+    forwarded = request.headers.get("x-forwarded-for")
+    ip = forwarded.split(",")[0].strip() if forwarded else (request.client.host if request.client else None)
+    ip_token = client_ip_var.set(ip)
     started_at = time.monotonic()
     try:
         response = await call_next(request)
@@ -55,5 +64,6 @@ async def correlation_id_middleware(request: Request, call_next: CallNext) -> Re
         )
     finally:
         correlation_id_var.reset(token)
+        client_ip_var.reset(ip_token)
     response.headers[_REQUEST_ID_HEADER] = correlation_id
     return response

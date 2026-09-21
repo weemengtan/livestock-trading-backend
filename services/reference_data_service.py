@@ -138,7 +138,8 @@ async def create_version(
     if resolved_model_type not in available_model_types():
         raise AppError(
             "UNKNOWN_MODEL_TYPE",
-            f"'{resolved_model_type}' is not an implemented DNBP model. Available: {', '.join(available_model_types())}.",
+            f"'{resolved_model_type}' is not an implemented DNBP model. "
+            f"Available: {', '.join(available_model_types())}.",
             422,
         )
     if active_version is not None:
@@ -256,6 +257,10 @@ async def activate_version(db: AsyncSession, version_id: uuid.UUID, *, actor_id:
         entity="reference_data_version",
         entity_id=version.id,
         before={"previous_active_version_id": str(before_active.id) if before_active else None},
-        after={"activated_at": datetime.now(UTC).isoformat(), "created_by": str(version.created_by), "model_type": version.model_type},
+        after={
+            "activated_at": datetime.now(UTC).isoformat(),
+            "created_by": str(version.created_by),
+            "model_type": version.model_type,
+        },
     )
     return version

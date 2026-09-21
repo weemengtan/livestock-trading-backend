@@ -130,7 +130,9 @@ async def create_contract(
     return record
 
 
-async def activate_contract(db: AsyncSession, contract_id: uuid.UUID, *, actor_id: uuid.UUID) -> IngestionContractRecord:
+async def activate_contract(
+    db: AsyncSession, contract_id: uuid.UUID, *, actor_id: uuid.UUID
+) -> IngestionContractRecord:
     record = await contracts_repo.get_by_id(db, contract_id)
     if record is None:
         raise NotFound("Ingestion contract")
