@@ -321,7 +321,7 @@ async def exceptions(
                 )
             )
 
-    constants = get_operational_constants()
+    constants = await get_operational_constants(db)
     cutoff = datetime.now(UTC) - timedelta(hours=constants.stale_instruction_hours)
     stale_pubs = await analytics_repo.list_stale_publications(db, org_id, cutoff=cutoff)
     stale_rows = [

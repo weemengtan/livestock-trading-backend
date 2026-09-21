@@ -29,6 +29,10 @@ class EverhealthConfig:
     dnbp_factor_by_species: dict[str, Decimal] = field(default_factory=dict)
     standard_weight_by_species: dict[str, Decimal] = field(default_factory=dict)
     ref_data_version: str = "unversioned"
+    # Opaque id of the reference_data_versions row this was loaded from
+    # (None for a config built from values/seed in tests). Stamped onto every
+    # computed workings row so a result names the exact version it used.
+    version_id: str | None = None
 
     @classmethod
     def from_values(
@@ -38,12 +42,14 @@ class EverhealthConfig:
         dnbp_factor_by_species: dict[str, Any],
         standard_weight_by_species: dict[str, Any] | None = None,
         ref_data_version: str = "unversioned",
+        version_id: str | None = None,
     ) -> "EverhealthConfig":
         return cls(
             cif_buffer_per_kg=_to_decimal(cif_buffer_per_kg),
             dnbp_factor_by_species={k: _to_decimal(v) for k, v in dnbp_factor_by_species.items()},
             standard_weight_by_species={k: _to_decimal(v) for k, v in (standard_weight_by_species or {}).items()},
             ref_data_version=ref_data_version,
+            version_id=version_id,
         )
 
     @classmethod

@@ -11,8 +11,9 @@ from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.errors import AbattoirOwnedTable, AppError, ImpactPreviewRequired, NotFound
-from core.reference_data import get_active_everhealth_config
+from core.config import settings
+from core.errors import AbattoirOwnedTable, AppError, FourEyesRequired, ImpactPreviewRequired, NotFound
+from core.reference_data import WEEKDAYS, get_active_everhealth_config
 from domain.engine.config import EverhealthConfig
 from domain.engine.impact import ImpactLineInput, ImpactPreview, compute_impact
 from domain.engine.workings import Lifecycle
@@ -41,6 +42,10 @@ _WRITABLE_TABLE_KEYS = {
     "cif_buffer_per_kg": ReferenceDataTableKey.CIF_BUFFER_PER_KG,
     "dnbp_factor_by_species": ReferenceDataTableKey.DNBP_FACTOR,
     "standard_weight_by_species": ReferenceDataTableKey.STANDARD_WEIGHT,
+    "bid_check_close_threshold_pct": ReferenceDataTableKey.BID_CHECK_CLOSE_THRESHOLD_PCT,
+    "buyer_weight_band_tolerance_pct": ReferenceDataTableKey.BUYER_WEIGHT_BAND_TOLERANCE_PCT,
+    "stale_instruction_hours": ReferenceDataTableKey.STALE_INSTRUCTION_HOURS,
+    "saleyard_calendar": ReferenceDataTableKey.SALEYARD_CALENDAR,
 }
 
 # Only these two can move `AC` — the impact-preview/second-confirmation
@@ -57,6 +62,37 @@ def resolve_table_key(raw_table_key: str) -> ReferenceDataTableKey:
     if resolved is None:
         raise AppError("UNKNOWN_TABLE_KEY", f"'{raw_table_key}' is not a recognised reference-data table.", 422)
     return resolved
+
+
+def _invalid(message: str) -> AppError:
+    return AppError("INVALID_REFERENCE_DATA_VALUE", message, 422)
+
+
+def validate_entry(table_key: ReferenceDataTableKey, key1: str | None, key2: str | None, value: Decimal) -> None:
+    """Reject a value that could only be a mistake, before it is versioned.
+    Ranges are deliberately about plausibility, not business policy."""
+    if table_key in (
+        ReferenceDataTableKey.BID_CHECK_CLOSE_THRESHOLD_PCT,
+        ReferenceDataTableKey.BUYER_WEIGHT_BAND_TOLERANCE_PCT,
+    ):
+        if not Decimal(0) < value <= Decimal(100):
+            raise _invalid(f"{table_key.value} must be greater than 0 and at most 100 (a percentage).")
+    elif table_key == ReferenceDataTableKey.STALE_INSTRUCTION_HOURS:
+        if value <= 0 or value != value.to_integral_value():
+            raise _invalid("STALE_INSTRUCTION_HOURS must be a positive whole number of hours.")
+    elif table_key == ReferenceDataTableKey.SALEYARD_CALENDAR:
+        if not key1 or not key1.strip():
+            raise _invalid("A saleyard calendar row needs a saleyard name.")
+        if key2 not in WEEKDAYS:
+            raise _invalid(f"A saleyard calendar row needs a day of the week ({', '.join(WEEKDAYS)}).")
+        if value < 0:
+            raise _invalid("A saleyard prepayment cannot be negative.")
+    elif table_key == ReferenceDataTableKey.CIF_BUFFER_PER_KG:
+        if value < 0:
+            raise _invalid("The CIF buffer cannot be negative.")
+    elif table_key in (ReferenceDataTableKey.DNBP_FACTOR, ReferenceDataTableKey.STANDARD_WEIGHT):
+        if not key1 or value <= 0:
+            raise _invalid(f"{table_key.value} needs a species and a value greater than 0.")
 
 
 async def list_versions(db: AsyncSession) -> list[ReferenceDataVersion]:
@@ -81,7 +117,7 @@ async def create_version(
     actor_id: uuid.UUID,
     effective_from: datetime,
     note: str | None,
-    raw_entries: list[tuple[str, str | None, Decimal]],
+    raw_entries: list[tuple[str, str | None, str | None, Decimal, str | None]],
 ) -> ReferenceDataVersion:
     """Every version is a COMPLETE, standalone snapshot of the Everhealth
     config — same philosophy as order_snapshots being a full cumulative
@@ -93,17 +129,21 @@ async def create_version(
     `get_active_everhealth_config` unable to find e.g. cif_buffer once this
     version activates. Never an in-place edit: the clone is a new row, the
     active version is untouched."""
-    merged: dict[tuple[ReferenceDataTableKey, str | None], Decimal] = {}
+    merged: dict[tuple[ReferenceDataTableKey, str | None, str | None], tuple[Decimal, str | None]] = {}
 
     active_version = await reference_data_repo.get_active_version(db)
     if active_version is not None:
         for entry in await reference_data_repo.list_entries(db, active_version.id):
-            merged[(entry.table_key, entry.key1)] = entry.value
+            merged[(entry.table_key, entry.key1, entry.key2)] = (entry.value, entry.text_value)
 
-    for raw_table_key, key1, value in raw_entries:
-        merged[(resolve_table_key(raw_table_key), key1)] = value
+    for raw_table_key, key1, key2, value, text_value in raw_entries:
+        table_key = resolve_table_key(raw_table_key)
+        validate_entry(table_key, key1, key2, value)
+        merged[(table_key, key1, key2)] = (value, text_value)
 
-    resolved_entries = [(table_key, key1, value) for (table_key, key1), value in merged.items()]
+    resolved_entries = [
+        (table_key, key1, key2, value, text_value) for (table_key, key1, key2), (value, text_value) in merged.items()
+    ]
 
     version = await reference_data_repo.create_version(
         db,
@@ -124,7 +164,9 @@ async def create_version(
     return version
 
 
-async def preview_impact(db: AsyncSession, version_id: uuid.UUID, *, org_id: uuid.UUID) -> ImpactPreview:
+async def preview_impact(
+    db: AsyncSession, version_id: uuid.UUID, *, org_id: uuid.UUID, actor_id: uuid.UUID
+) -> ImpactPreview:
     version, entries = await get_version_with_entries(db, version_id)
 
     # create_version already persisted a COMPLETE snapshot (cloned from the
@@ -169,7 +211,7 @@ async def preview_impact(db: AsyncSession, version_id: uuid.UUID, *, org_id: uui
     await reference_data_repo.mark_impact_previewed(db, version)
     await audit_service.write(
         db,
-        actor_id=None,
+        actor_id=actor_id,
         action="reference_data_version.impact_previewed",
         entity="reference_data_version",
         entity_id=version.id,
@@ -187,9 +229,11 @@ async def activate_version(db: AsyncSession, version_id: uuid.UUID, *, actor_id:
         raise NotFound("Reference data version")
     if version.impact_previewed_at is None:
         raise ImpactPreviewRequired()
+    if settings.reference_data_four_eyes_required and version.created_by == actor_id:
+        raise FourEyesRequired()
 
     before_active = await reference_data_repo.get_active_version(db)
-    await reference_data_repo.activate(db, version)
+    await reference_data_repo.activate(db, version, activated_by=actor_id)
 
     await audit_service.write(
         db,
@@ -198,6 +242,6 @@ async def activate_version(db: AsyncSession, version_id: uuid.UUID, *, actor_id:
         entity="reference_data_version",
         entity_id=version.id,
         before={"previous_active_version_id": str(before_active.id) if before_active else None},
-        after={"activated_at": datetime.now(UTC).isoformat()},
+        after={"activated_at": datetime.now(UTC).isoformat(), "created_by": str(version.created_by)},
     )
     return version

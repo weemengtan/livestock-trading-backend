@@ -13,7 +13,9 @@ class ReferenceDataEntryInput(BaseModel):
 
     table_key: str
     key1: str | None = None
+    key2: str | None = None
     value: Decimal
+    text_value: str | None = None
 
 
 class CreateVersionRequest(BaseModel):
@@ -26,7 +28,9 @@ class ReferenceDataEntryResponse(BaseModel):
     id: uuid.UUID
     table_key: str
     key1: str | None
+    key2: str | None
     value: Decimal
+    text_value: str | None
 
     model_config = {"from_attributes": True}
 
@@ -38,6 +42,7 @@ class ReferenceDataVersionResponse(BaseModel):
     note: str | None
     is_active: bool
     activated_at: datetime | None
+    activated_by: uuid.UUID | None
     impact_previewed_at: datetime | None
     created_at: datetime
 
@@ -48,14 +53,26 @@ class ReferenceDataVersionDetailResponse(ReferenceDataVersionResponse):
     entries: list[ReferenceDataEntryResponse]
 
 
+class SaleyardCalendarRow(BaseModel):
+    saleyard: str
+    day: str
+    prepayment_aud: Decimal
+    note: str | None
+
+
 class ActiveConfigResponse(BaseModel):
     """§9.8 `GET /reference-data/active` — both halves, labelled by owner
     (§11.7's framing: which panel is editable, which is read-only)."""
 
     ref_data_version: str
+    ref_data_version_id: str | None
     cif_buffer_per_kg: Decimal
     dnbp_factor_by_species: dict[str, Decimal]
     standard_weight_by_species: dict[str, Decimal]
+    bid_check_close_threshold_pct: Decimal
+    buyer_weight_band_tolerance_pct: Decimal
+    stale_instruction_hours: int
+    saleyard_calendar: list["SaleyardCalendarRow"]
     owner: str = "EVERHEALTH"
 
 

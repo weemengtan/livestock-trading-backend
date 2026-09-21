@@ -210,7 +210,7 @@ async def patch_entry(
         # Rescored against the FROZEN dnbp_at_entry, never a re-fetched
         # publication (§12.4's non-negotiable) — this is only correcting a
         # typo in what was bid/weighed, not re-litigating which DNBP applied.
-        close_threshold = get_operational_constants().bid_check_close_threshold_pct
+        close_threshold = (await get_operational_constants(db)).bid_check_close_threshold_pct
         result = score_bid(
             price_per_head=entry.price_per_head,
             weight_kg=entry.weight_kg,
@@ -250,7 +250,7 @@ async def instruction_current(
     if instruction is None:
         raise NotFound("Buy instruction")
     lines = await buy_instructions_repo.list_lines(db, instruction.id)
-    saleyard_entry = resolve_saleyard_for_date(instruction.trade_date, get_saleyard_calendar())
+    saleyard_entry = resolve_saleyard_for_date(instruction.trade_date, await get_saleyard_calendar(db))
     return InstructionResponse(
         instruction_id=str(instruction.id),
         instruction_no=instruction.instruction_no,

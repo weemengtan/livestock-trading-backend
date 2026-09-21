@@ -32,7 +32,12 @@ class OrderWorkings(TimestampedBase):
         UUID(as_uuid=True), ForeignKey("order_lines.id"), unique=True, index=True
     )
     engine_version: Mapped[str] = mapped_column(String)
-    ref_data_version: Mapped[str] = mapped_column(String)
+    ref_data_version: Mapped[str] = mapped_column(String)  # human-readable label (effective date)
+    # The exact reference-data version this row was computed under. NULL only
+    # on rows written before this column existed.
+    ref_data_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("reference_data_versions.id"), default=None, index=True
+    )
     computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     adjusted_price_per_kg: Mapped[Decimal | None] = mapped_column(MONEY, default=None)  # X

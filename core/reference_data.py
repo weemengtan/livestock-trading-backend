@@ -1,105 +1,41 @@
-"""Loads reference configuration for the engine (§6).
+"""Loads the active reference configuration (§6) — always from Postgres.
 
-`get_active_everhealth_config` (Phase 3b) is the one this system's
-money-moving config — §6.4 standard weight, §6.5 dnbp factor, §6.7
-cif_buffer — comes from: the currently-active `reference_data_versions` row
-in Postgres, editable through the Reference Data screen (§11.7) with
-effective-dating, an impact-preview gate, and audit (§6.5). No caching: the
-whole point of admin-editable config is that activating a new version takes
-effect on the very next calculation, not after a process restart.
+Everything here comes from the currently-active `reference_data_versions`
+row and its `reference_data_entries`: the DNBP parameters (§6.4, §6.5,
+§6.7 cif buffer), the operational tunables (§6.7) and the saleyard calendar
+(§6.8). Versioned, effective-dated, audited, editable through the Reference
+Data screen (§11.7). No caching and no file reads: activating a new version
+takes effect on the very next request, and every process sees the same
+values.
 
-`get_abattoir_fixed_costs` and `get_operational_constants` stay exactly as
-Phase 2/3 built them, seed-file-backed. Neither is a §6.5-style
-source-of-truth input — the abattoir fixed costs only reproduce the
-abattoir's own benchmark formula for cross-checking (§5.2), and the
-operational constants (bid-check threshold, weight-band tolerance, stale-
-instruction hours) tune supporting UX, not `AC` — so neither needs the
-versioning/impact-preview/audit machinery this phase adds. `EverhealthConfig`
-itself (domain/engine/config.py) and its `from_seed_json` loader are
-untouched; `from_values` is what the DB-backed path uses now.
-
-`get_saleyard_calendar` (Phase 4) is new — §6.8's saleyard/day/prepayment
-schedule was already sitting in the seed JSON (`everhealth.saleyard_calendar`)
-but nothing read it until the Buy Instruction's prepayment block needed it.
-Same seed-file-backed pattern as `get_operational_constants`: not a
-source-of-truth input, no versioning/impact-preview needed.
+`fixtures/reference-data-seed.json` is a bootstrap seed only (the Alembic
+migrations and scripts/seed_reference_data.py read it once); nothing at
+runtime reads it.
 """
 
-import json
+import uuid
 from dataclasses import dataclass
 from decimal import Decimal
-from functools import lru_cache
-from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.config import settings
-from core.errors import NoActiveReferenceDataError
+from core.errors import NoActiveReferenceDataError, ReferenceDataIncomplete
 from domain.engine.config import EverhealthConfig
 from models.enums import ReferenceDataTableKey
+from models.reference_data import ReferenceDataEntry, ReferenceDataVersion
 from repositories import reference_data as reference_data_repo
 
-_BACKEND_ROOT = Path(__file__).resolve().parent.parent
-_DEFAULT_SEED_PATH = _BACKEND_ROOT / "fixtures" / "reference-data-seed.json"
-
-
-def _seed_path() -> Path:
-    if settings.reference_data_seed_path:
-        return Path(settings.reference_data_seed_path)
-    return _DEFAULT_SEED_PATH
-
-
-async def get_active_everhealth_config(db: AsyncSession) -> EverhealthConfig:
-    version = await reference_data_repo.get_active_version(db)
-    if version is None:
-        raise NoActiveReferenceDataError()
-
-    entries = await reference_data_repo.list_entries(db, version.id)
-
-    cif_buffer_per_kg: Decimal | None = None
-    dnbp_factor_by_species: dict[str, Decimal] = {}
-    standard_weight_by_species: dict[str, Decimal] = {}
-
-    for entry in entries:
-        if entry.table_key == ReferenceDataTableKey.CIF_BUFFER_PER_KG:
-            cif_buffer_per_kg = entry.value
-        elif entry.table_key == ReferenceDataTableKey.DNBP_FACTOR:
-            dnbp_factor_by_species[entry.key1] = entry.value
-        elif entry.table_key == ReferenceDataTableKey.STANDARD_WEIGHT:
-            standard_weight_by_species[entry.key1] = entry.value
-
-    if cif_buffer_per_kg is None:
-        raise NoActiveReferenceDataError()
-
-    return EverhealthConfig(
-        cif_buffer_per_kg=cif_buffer_per_kg,
-        dnbp_factor_by_species=dnbp_factor_by_species,
-        standard_weight_by_species=standard_weight_by_species,
-        ref_data_version=version.effective_from.date().isoformat(),
-    )
-
-
-@lru_cache
-def get_abattoir_fixed_costs() -> tuple[Decimal, Decimal]:
-    """(fixed_cost_per_head_active, fixed_cost_per_head_loaded) — §6.7's
-    40/34 constants used only to reproduce the abattoir's own Gayan `T`
-    formula for the §5.2 cross-check. Not a workbook table (see
-    domain/ingestion/lookup_sheet.py's module docstring) — sourced from the
-    seed file, same as Everhealth's own constants."""
-    data = json.loads(_seed_path().read_text())
-    values = data["abattoir"]["benchmark_fixed_cost_per_head"]["values"]
-    return Decimal(str(values["ACTIVE"])), Decimal(str(values["LOADED"]))
+WEEKDAYS = ("MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY")
 
 
 @dataclass(frozen=True, slots=True)
 class OperationalConstants:
-    """§6.7's operational tunables that Phase 3 needs and Phase 1/2 had no
-    use for yet: Bid Check's PASS/CLOSE threshold (§12.3), the buyer's
-    displayed weight band tolerance around a species' standard weight
-    (§12.2, D10), and the "instruction is stale" banner threshold (§3,
-    §12.2). None of these are source-of-truth inputs (§6.5) — they tune
-    supporting UX, not `AC` — so they carry none of the impact-preview/
-    audit machinery reserved for the DNBP factor table and cif_buffer."""
+    """§6.7's operational tunables: Bid Check's PASS/CLOSE threshold
+    (§12.3), the buyer's displayed weight band tolerance around a species'
+    standard weight (§12.2, D10), and the "instruction is stale" banner
+    threshold (§3, §12.2). Versioned and audited like everything else here,
+    but none are source-of-truth inputs (§6.5) — they tune supporting UX,
+    not `AC`."""
 
     bid_check_close_threshold_pct: Decimal
     buyer_weight_band_tolerance_pct: Decimal
@@ -109,28 +45,83 @@ class OperationalConstants:
 @dataclass(frozen=True, slots=True)
 class SaleyardCalendarEntry:
     saleyard: str
-    day: str  # MONDAY|TUESDAY|THURSDAY|FRIDAY, as stored in the seed
+    day: str  # MONDAY..SUNDAY
     prepayment_aud: Decimal
     note: str | None
 
 
-@lru_cache
-def get_saleyard_calendar() -> tuple[SaleyardCalendarEntry, ...]:
-    """§6.8, §13.1's prepayment block. Order is preserved exactly as seeded
-    (Bendigo/Ballarat/Wagga/Griffith) so the Buy Instruction export always
-    lists the full schedule in the same order as the real v3 sample,
-    regardless of which saleyards actually traded that week."""
-    data = json.loads(_seed_path().read_text())
-    rows = data["everhealth"]["saleyard_calendar"]["values"]
-    return tuple(
-        SaleyardCalendarEntry(
-            saleyard=row["saleyard"],
-            day=row["day"],
-            prepayment_aud=Decimal(str(row["prepayment_aud"])),
-            note=row.get("note"),
-        )
-        for row in rows
+async def _load_active(db: AsyncSession) -> tuple[ReferenceDataVersion, list[ReferenceDataEntry]]:
+    version = await reference_data_repo.get_active_version(db)
+    if version is None:
+        raise NoActiveReferenceDataError()
+    return version, await reference_data_repo.list_entries(db, version.id)
+
+
+def _scalar(entries: list[ReferenceDataEntry], key: ReferenceDataTableKey) -> Decimal:
+    for entry in entries:
+        if entry.table_key == key:
+            return entry.value
+    raise ReferenceDataIncomplete(key.value)
+
+
+async def get_active_version_id(db: AsyncSession) -> uuid.UUID:
+    version = await reference_data_repo.get_active_version(db)
+    if version is None:
+        raise NoActiveReferenceDataError()
+    return version.id
+
+
+async def get_active_everhealth_config(db: AsyncSession) -> EverhealthConfig:
+    version, entries = await _load_active(db)
+
+    dnbp_factor_by_species: dict[str, Decimal] = {}
+    standard_weight_by_species: dict[str, Decimal] = {}
+    for entry in entries:
+        if entry.table_key == ReferenceDataTableKey.DNBP_FACTOR:
+            dnbp_factor_by_species[entry.key1] = entry.value
+        elif entry.table_key == ReferenceDataTableKey.STANDARD_WEIGHT:
+            standard_weight_by_species[entry.key1] = entry.value
+
+    try:
+        cif_buffer_per_kg = _scalar(entries, ReferenceDataTableKey.CIF_BUFFER_PER_KG)
+    except ReferenceDataIncomplete as exc:
+        raise NoActiveReferenceDataError() from exc
+
+    return EverhealthConfig(
+        cif_buffer_per_kg=cif_buffer_per_kg,
+        dnbp_factor_by_species=dnbp_factor_by_species,
+        standard_weight_by_species=standard_weight_by_species,
+        ref_data_version=version.effective_from.date().isoformat(),
+        version_id=str(version.id),
     )
+
+
+async def get_operational_constants(db: AsyncSession) -> OperationalConstants:
+    _version, entries = await _load_active(db)
+    return OperationalConstants(
+        bid_check_close_threshold_pct=_scalar(entries, ReferenceDataTableKey.BID_CHECK_CLOSE_THRESHOLD_PCT),
+        buyer_weight_band_tolerance_pct=_scalar(entries, ReferenceDataTableKey.BUYER_WEIGHT_BAND_TOLERANCE_PCT),
+        stale_instruction_hours=int(_scalar(entries, ReferenceDataTableKey.STALE_INSTRUCTION_HOURS)),
+    )
+
+
+async def get_saleyard_calendar(db: AsyncSession) -> tuple[SaleyardCalendarEntry, ...]:
+    """§6.8, §13.1's prepayment block, in weekday order (then saleyard name)
+    so the Buy Instruction export always lists the full schedule in the same
+    order regardless of which saleyards actually traded that week."""
+    _version, entries = await _load_active(db)
+    rows = [
+        SaleyardCalendarEntry(
+            saleyard=entry.key1,
+            day=entry.key2,
+            prepayment_aud=entry.value,
+            note=entry.text_value,
+        )
+        for entry in entries
+        if entry.table_key == ReferenceDataTableKey.SALEYARD_CALENDAR
+    ]
+    rows.sort(key=lambda row: (WEEKDAYS.index(row.day), row.saleyard))
+    return tuple(rows)
 
 
 def resolve_saleyard_for_date(trade_date, calendar: tuple[SaleyardCalendarEntry, ...]) -> SaleyardCalendarEntry | None:
@@ -143,14 +134,3 @@ def resolve_saleyard_for_date(trade_date, calendar: tuple[SaleyardCalendarEntry,
         if entry.day == day_name:
             return entry
     return None
-
-
-@lru_cache
-def get_operational_constants() -> OperationalConstants:
-    data = json.loads(_seed_path().read_text())
-    values = data["everhealth"]["operational_constants"]
-    return OperationalConstants(
-        bid_check_close_threshold_pct=Decimal(str(values["bid_check_close_threshold_pct"])),
-        buyer_weight_band_tolerance_pct=Decimal(str(values["buyer_weight_band_tolerance_pct"])),
-        stale_instruction_hours=int(values["stale_instruction_hours"]),
-    )

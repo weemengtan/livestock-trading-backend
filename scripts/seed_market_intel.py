@@ -86,10 +86,10 @@ def _weighted_head_count(rng: random.Random) -> int:
     return rng.choice([5, 8, 10, 12, 15, 18, 20, 25, 30])
 
 
-def _build_rows(*, org_id: uuid.UUID, observer_id: uuid.UUID) -> list[MarketObservation]:
+def _build_rows(
+    *, org_id: uuid.UUID, observer_id: uuid.UUID, calendar, weight_tolerance_pct: Decimal
+) -> list[MarketObservation]:
     rng = random.Random(RANDOM_SEED)
-    calendar = get_saleyard_calendar()
-    weight_tolerance_pct = get_operational_constants().buyer_weight_band_tolerance_pct / Decimal(100)
 
     rows: list[MarketObservation] = []
     today = date.today()
@@ -156,7 +156,11 @@ async def main() -> None:
         )
         print(f"Removed {deleted.rowcount} previously seeded market observation(s).")
 
-        rows = _build_rows(org_id=org.id, observer_id=buyer.id)
+        calendar = await get_saleyard_calendar(session)
+        weight_tolerance_pct = (await get_operational_constants(session)).buyer_weight_band_tolerance_pct / Decimal(100)
+        rows = _build_rows(
+            org_id=org.id, observer_id=buyer.id, calendar=calendar, weight_tolerance_pct=weight_tolerance_pct
+        )
         session.add_all(rows)
         await session.commit()
 

@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Numeric, String, func
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, Numeric, String, func, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -33,12 +33,23 @@ class ReferenceDataVersion(TimestampedBase):
     """
 
     __tablename__ = "reference_data_versions"
+    # Exactly one active version, enforced by the database and not only by
+    # service code: a second concurrent activation cannot commit.
+    __table_args__ = (
+        Index(
+            "uq_reference_data_versions_single_active",
+            "is_active",
+            unique=True,
+            postgresql_where=text("is_active"),
+        ),
+    )
 
     effective_from: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), default=None)
     note: Mapped[str | None] = mapped_column(String, default=None)
     is_active: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    activated_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), default=None)
     impact_previewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
 
 
@@ -46,8 +57,10 @@ class ReferenceDataEntry(TimestampedBase):
     """§8: `(table_key, key1, key2, value)`. `key1` is a bare species code
     for DNBP_FACTOR/STANDARD_WEIGHT — never an FK to
     species_registry (§6.9: no FK constraint against species anywhere).
-    `key2` exists for §8 shape-parity but is unused by every table_key this
-    system has today; CIF_BUFFER_PER_KG uses neither key1 nor key2."""
+    `key2` is used only by SALEYARD_CALENDAR (the day of week);
+    CIF_BUFFER_PER_KG and the operational constants use neither key.
+    `text_value` carries free text that belongs with a numeric value
+    (SALEYARD_CALENDAR's note)."""
 
     __tablename__ = "reference_data_entries"
 
@@ -60,6 +73,7 @@ class ReferenceDataEntry(TimestampedBase):
     key1: Mapped[str | None] = mapped_column(String, default=None)
     key2: Mapped[str | None] = mapped_column(String, default=None)
     value: Mapped[Decimal] = mapped_column(MONEY)
+    text_value: Mapped[str | None] = mapped_column(String, default=None)
 
 
 class SpeciesRegistry(Base):

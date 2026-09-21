@@ -7,7 +7,6 @@ from domain.engine.workings import Lifecycle
 from models.order_line import OrderLine
 from models.order_workings import OrderWorkings
 
-
 # §8's order_workings column list — the fields calculate_snapshot actually
 # computes. Deliberately an allowlist, not "every column except id/
 # order_line_id/created_at": computed_at and updated_at are server-managed
@@ -17,6 +16,7 @@ from models.order_workings import OrderWorkings
 COMPUTED_COLUMNS = (
     "engine_version",
     "ref_data_version",
+    "ref_data_version_id",
     "computed_at",
     "adjusted_price_per_kg",
     "pack_cost_per_kg",

@@ -238,6 +238,29 @@ class NoActiveReferenceDataError(AppError):
         )
 
 
+class ReferenceDataIncomplete(AppError):
+    """The active reference-data version lacks a value the system needs.
+    Never defaulted or guessed: the missing key is named so it can be added
+    in a new version."""
+
+    def __init__(self, missing: str) -> None:
+        super().__init__(
+            "REFERENCE_DATA_INCOMPLETE",
+            f"The active reference data version has no value for {missing}. Add it in a new version.",
+            status_code=500,
+            details={"missing": missing},
+        )
+
+
+class FourEyesRequired(AppError):
+    def __init__(self) -> None:
+        super().__init__(
+            "FOUR_EYES_REQUIRED",
+            "A reference data version must be activated by someone other than the person who created it.",
+            status_code=403,
+        )
+
+
 class IngestionRejected(AppError):
     """Wraps domain.ingestion.errors.IngestionContractError at the service
     boundary — the domain layer stays framework-agnostic (never imports

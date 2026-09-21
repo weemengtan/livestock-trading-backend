@@ -34,7 +34,7 @@ async def create_version(
     effective_from: datetime,
     created_by: uuid.UUID,
     note: str | None,
-    entries: list[tuple[ReferenceDataTableKey, str | None, Decimal]],
+    entries: list[tuple[ReferenceDataTableKey, str | None, str | None, Decimal, str | None]],
 ) -> ReferenceDataVersion:
     """A version is created whole, with its entries, and never edited
     afterwards (§6.5 non-negotiable: never an in-place edit)."""
@@ -47,8 +47,12 @@ async def create_version(
     db.add(version)
     await db.flush()
 
-    for table_key, key1, value in entries:
-        db.add(ReferenceDataEntry(version_id=version.id, table_key=table_key, key1=key1, value=value))
+    for table_key, key1, key2, value, text_value in entries:
+        db.add(
+            ReferenceDataEntry(
+                version_id=version.id, table_key=table_key, key1=key1, key2=key2, value=value, text_value=text_value
+            )
+        )
     await db.flush()
     return version
 
@@ -58,13 +62,18 @@ async def mark_impact_previewed(db: AsyncSession, version: ReferenceDataVersion)
     await db.flush()
 
 
-async def activate(db: AsyncSession, version: ReferenceDataVersion) -> None:
+async def activate(db: AsyncSession, version: ReferenceDataVersion, *, activated_by: uuid.UUID) -> None:
     """Flips exactly one version active at a time. Caller (the service
-    layer) is responsible for the impact_previewed_at gate check — this
-    function only performs the flip once permitted."""
+    layer) is responsible for the impact_previewed_at gate and the
+    separation-of-duties check — this function only performs the flip once
+    permitted. The previous version is deactivated and flushed first: the
+    partial unique index on is_active rejects two active rows even
+    momentarily, and the unit of work does not guarantee UPDATE order."""
     previous = await get_active_version(db)
     if previous is not None and previous.id != version.id:
         previous.is_active = False
+        await db.flush()
     version.is_active = True
     version.activated_at = datetime.now(UTC)
+    version.activated_by = activated_by
     await db.flush()

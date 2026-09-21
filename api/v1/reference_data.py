@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.deps import CurrentUser, require_role
 from core.db import get_db
+from core.reference_data import get_operational_constants, get_saleyard_calendar
 from models.enums import Role
 from schemas.reference_data import (
     ActiveConfigResponse,
@@ -18,6 +19,7 @@ from schemas.reference_data import (
     ReferenceDataEntryResponse,
     ReferenceDataVersionDetailResponse,
     ReferenceDataVersionResponse,
+    SaleyardCalendarRow,
     SpeciesResponse,
 )
 from services import reference_data_service, registry_service
@@ -32,11 +34,23 @@ _trading_console = require_role(Role.OWNER, Role.ACCOUNTANT)
 @router.get("/active", response_model=ActiveConfigResponse)
 async def get_active(current: CurrentUser = Depends(_trading_console), db: AsyncSession = Depends(get_db)):
     config = await reference_data_service.get_active_config(db)
+    constants = await get_operational_constants(db)
+    calendar = await get_saleyard_calendar(db)
     return ActiveConfigResponse(
         ref_data_version=config.ref_data_version,
+        ref_data_version_id=config.version_id,
         cif_buffer_per_kg=config.cif_buffer_per_kg,
         dnbp_factor_by_species=config.dnbp_factor_by_species,
         standard_weight_by_species=config.standard_weight_by_species,
+        bid_check_close_threshold_pct=constants.bid_check_close_threshold_pct,
+        buyer_weight_band_tolerance_pct=constants.buyer_weight_band_tolerance_pct,
+        stale_instruction_hours=constants.stale_instruction_hours,
+        saleyard_calendar=[
+            SaleyardCalendarRow(
+                saleyard=row.saleyard, day=row.day, prepayment_aud=row.prepayment_aud, note=row.note
+            )
+            for row in calendar
+        ],
     )
 
 
@@ -67,7 +81,7 @@ async def create_version(
         actor_id=current.user_id,
         effective_from=body.effective_from,
         note=body.note,
-        raw_entries=[(e.table_key, e.key1, e.value) for e in body.entries],
+        raw_entries=[(e.table_key, e.key1, e.key2, e.value, e.text_value) for e in body.entries],
     )
     await db.commit()
     return version
@@ -77,7 +91,9 @@ async def create_version(
 async def preview_impact(
     version_id: uuid.UUID, current: CurrentUser = Depends(_trading_console), db: AsyncSession = Depends(get_db)
 ):
-    preview = await reference_data_service.preview_impact(db, version_id, org_id=current.org_id)
+    preview = await reference_data_service.preview_impact(
+        db, version_id, org_id=current.org_id, actor_id=current.user_id
+    )
     await db.commit()
     return ImpactPreviewResponse(
         lines=[ImpactLineResponse(**dataclasses.asdict(line)) for line in preview.lines],

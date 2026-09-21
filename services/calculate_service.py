@@ -163,6 +163,7 @@ async def calculate_snapshot(db: AsyncSession, snapshot: OrderSnapshot, *, actor
                 order_line_id=order_line.id,
                 engine_version=ENGINE_VERSION,
                 ref_data_version=config.ref_data_version,
+                ref_data_version_id=uuid.UUID(config.version_id) if config.version_id else None,
                 computed_at=datetime.now(UTC),
                 adjusted_price_per_kg=workings.adjusted_price_per_kg,
                 pack_cost_per_kg=workings.pack_cost_per_kg,

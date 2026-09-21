@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -50,13 +52,16 @@ class Settings(BaseSettings):
     # needs no re-enrollment.
     mfa_enforcement_enabled: bool = True
 
-    # Phase 2 — where EverhealthConfig loads its seed values from (§6).
-    # Defaults to backend/fixtures/reference-data-seed.json (vendored —
-    # see backend/fixtures/README.md for why); override only for a
-    # genuinely different seed source (e.g. a test fixture), which is why
-    # this stays a setting rather than a hardcoded path in
-    # domain/engine/config.py itself.
-    reference_data_seed_path: str | None = None
+    # "dev" | "test" | "prod". Defaults to the safe choice: destructive
+    # developer tooling (scripts/wipe_business_data.py) refuses to run unless
+    # this is explicitly "dev". Local .env sets ENVIRONMENT=dev.
+    environment: Literal["dev", "test", "prod"] = "prod"
+
+    # §6.5 separation of duties: a reference-data version can only be
+    # activated by someone other than the person who created it. Defaults to
+    # True (the secure choice); local dev/CI set this False so one person
+    # can exercise the whole propose -> preview -> activate flow alone.
+    reference_data_four_eyes_required: bool = True
 
     # Ephemeral parse-preview cache TTL (§7.3's upload -> preview -> commit
     # flow) — long enough for Bing to review a preview before confirming.
