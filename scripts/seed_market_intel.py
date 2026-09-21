@@ -1,7 +1,7 @@
 """Demo/dev seed for the Market Intelligence module (competitor bid
 observations) — grounded in the app's own domain data rather than invented
 saleyards or species: trading days come from the real saleyard_calendar
-(Bendigo/Ballarat/Wagga/Griffith, fixtures/reference-data-seed.json, via
+(the active saleyard calendar, via
 core.reference_data.get_saleyard_calendar), per-species weights start from
 that same file's standard_weight_by_species, and the weight jitter uses the
 seeded buyer_weight_band_tolerance_pct (15%) operational constant.
@@ -39,7 +39,7 @@ SEED_MARKER = "[seed:market-intel-demo]"
 WEEKS_OF_HISTORY = 10
 RANDOM_SEED = 20260917  # fixed — same distribution shape on every run, only the date window shifts with "today"
 
-# Same species set as fixtures/reference-data-seed.json's open species
+# Same species set as the open species
 # registry. Per-head standard weight (kg) mirrors that file's
 # standard_weight_by_species — MUTTON is absent there (a known data gap,
 # see that file's own comment), so 24kg is used here, the value that

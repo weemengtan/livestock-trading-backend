@@ -8,9 +8,9 @@ Data screen (§11.7). No caching and no file reads: activating a new version
 takes effect on the very next request, and every process sees the same
 values.
 
-`fixtures/reference-data-seed.json` is a bootstrap seed only (the Alembic
-migrations and scripts/seed_reference_data.py read it once); nothing at
-runtime reads it.
+The first reference-data version of a new database is created by an operator
+(scripts/seed_reference_data.py --file <your bootstrap JSON>, or the Reference
+Data screen); nothing at runtime reads any file.
 """
 
 import uuid

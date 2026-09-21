@@ -1,10 +1,11 @@
 """reference config in postgres: operational constants, saleyard calendar, version identity
 
-Operational constants and the saleyard calendar were read from
-fixtures/reference-data-seed.json at runtime. They now live in the same
-versioned, audited reference_data tables as the DNBP parameters, and the
-JSON is a bootstrap seed only. Every existing version is backfilled once
-from the seed file so each remains a complete, standalone snapshot.
+Operational constants and the saleyard calendar were read from a seed file
+at runtime. They now live in the same versioned, audited reference_data
+tables as the DNBP parameters. Every version that already exists is
+backfilled once with the three generic operational constants so it remains a
+complete, standalone snapshot; the saleyard calendar is business data and is
+not seeded here (a version simply has no rows until an operator adds them).
 
 Also: exactly one active version is now enforced by a partial unique index;
 a version records who activated it; and workings rows can carry the exact
@@ -15,9 +16,7 @@ Revises: 7c2e91a4d3b8
 Create Date: 2026-09-21 12:00:00.000000
 
 """
-import json
 import uuid
-from pathlib import Path
 from typing import Sequence, Union
 
 from alembic import op
@@ -30,8 +29,6 @@ down_revision: Union[str, None] = '7c2e91a4d3b8'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
-_SEED_PATH = Path(__file__).resolve().parents[2] / "fixtures" / "reference-data-seed.json"
-
 _NEW_TABLE_KEYS = (
     "BID_CHECK_CLOSE_THRESHOLD_PCT",
     "BUYER_WEIGHT_BAND_TOLERANCE_PCT",
@@ -41,22 +38,12 @@ _NEW_TABLE_KEYS = (
 
 
 def _seed_entries() -> list[dict]:
-    everhealth = json.loads(_SEED_PATH.read_text())["everhealth"]
-    constants = everhealth["operational_constants"]
-    entries = [
-        {"table_key": "BID_CHECK_CLOSE_THRESHOLD_PCT", "key1": None, "key2": None,
-         "value": str(constants["bid_check_close_threshold_pct"]), "text_value": None},
-        {"table_key": "BUYER_WEIGHT_BAND_TOLERANCE_PCT", "key1": None, "key2": None,
-         "value": str(constants["buyer_weight_band_tolerance_pct"]), "text_value": None},
-        {"table_key": "STALE_INSTRUCTION_HOURS", "key1": None, "key2": None,
-         "value": str(constants["stale_instruction_hours"]), "text_value": None},
+    # Generic operational defaults, applied only to versions that already exist.
+    return [
+        {"table_key": "BID_CHECK_CLOSE_THRESHOLD_PCT", "key1": None, "key2": None, "value": "5", "text_value": None},
+        {"table_key": "BUYER_WEIGHT_BAND_TOLERANCE_PCT", "key1": None, "key2": None, "value": "15", "text_value": None},
+        {"table_key": "STALE_INSTRUCTION_HOURS", "key1": None, "key2": None, "value": "24", "text_value": None},
     ]
-    for row in everhealth["saleyard_calendar"]["values"]:
-        entries.append(
-            {"table_key": "SALEYARD_CALENDAR", "key1": row["saleyard"], "key2": row["day"],
-             "value": str(row["prepayment_aud"]), "text_value": row.get("note")}
-        )
-    return entries
 
 
 def upgrade() -> None:

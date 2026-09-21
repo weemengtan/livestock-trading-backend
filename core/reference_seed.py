@@ -1,7 +1,34 @@
-"""Bootstrap only: turns fixtures/reference-data-seed.json's `everhealth`
-block into `reference_data_entries` rows. Used by scripts/seed_reference_data.py
-(reseeding an empty dev DB) and the test fixtures. Nothing at runtime reads
-the seed file — the application reads the active version from Postgres."""
+"""Bootstrap only: turns a bootstrap JSON file's `everhealth` block into
+`reference_data_entries` rows (used by scripts/seed_reference_data.py to
+give an empty dev database its first reference-data version). The file is
+business-confidential (pricing parameters, saleyard arrangements) and is
+never part of this repository — the caller passes its path explicitly.
+Nothing at runtime reads any file: the application reads the active version
+from Postgres.
+
+Expected shape (values are yours to supply):
+
+    {
+      "effective_from": "YYYY-MM-DD",
+      "everhealth": {
+        "cif_buffer_per_kg": {"value": <number>},
+        "dnbp_factor_by_species": {"values": {"<SPECIES>": <number>, ...}},
+        "standard_weight_by_species": {"values": {"<SPECIES>": <number>, ...}},
+        "operational_constants": {
+          "bid_check_close_threshold_pct": <number>,
+          "buyer_weight_band_tolerance_pct": <number>,
+          "stale_instruction_hours": <integer>
+        },
+        "saleyard_calendar": {"values": [
+          {"saleyard": "<name>", "day": "MONDAY", "prepayment_aud": <number>, "note": "<text or null>"}
+        ]}
+      },
+      "open_registries": {
+        "species": {"seed_rows": ["<SPECIES>", ...]},
+        "product_type": {"seed_rows": ["<PRODUCT TYPE>", ...]}
+      }
+    }
+"""
 
 import json
 from decimal import Decimal
@@ -9,13 +36,11 @@ from pathlib import Path
 
 from models.enums import ReferenceDataTableKey
 
-SEED_PATH = Path(__file__).resolve().parent.parent / "fixtures" / "reference-data-seed.json"
-
 SeedEntry = tuple[ReferenceDataTableKey, str | None, str | None, Decimal, str | None]  # key, key1, key2, value, text
 
 
-def load_seed(path: Path = SEED_PATH) -> dict:
-    return json.loads(path.read_text())
+def load_seed(path: Path) -> dict:
+    return json.loads(Path(path).read_text())
 
 
 def seed_entries(seed: dict) -> list[SeedEntry]:

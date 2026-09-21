@@ -5,15 +5,17 @@ migration — a data migration only ever runs once, so it can't be used to
 restore this after a dev DB reset. This script exists for exactly that:
 reseeding reference data into an already-migrated, otherwise-empty DB.
 
-Same source file tests/conftest.py's _seed_reference_data fixture reads
-(fixtures/reference-data-seed.json), same values — this just targets the
-real dev DB and the real "everhealth" org instead of a per-test one.
+The values come from a bootstrap JSON file YOU supply (pricing parameters and
+saleyard arrangements are business-confidential and are not kept in this
+repository). Its expected shape is documented in core/reference_seed.py.
 
-Run with: uv run python -m scripts.seed_reference_data
+Run with: uv run python -m scripts.seed_reference_data --file /path/to/bootstrap.json
 """
 
+import argparse
 import asyncio
 from datetime import UTC, date, datetime
+from pathlib import Path
 
 from core.db import async_session_factory
 from core.reference_seed import load_seed, seed_entries
@@ -23,7 +25,7 @@ from repositories import organisations as org_repo
 from repositories import reference_data as reference_data_repo
 
 
-async def main() -> None:
+async def main(seed_file: Path) -> None:
     async with async_session_factory() as session:
         existing = await reference_data_repo.get_active_version(session)
         if existing is not None:
@@ -34,7 +36,7 @@ async def main() -> None:
         if everhealth is None:
             raise RuntimeError("No Everhealth org found — run `uv run python -m scripts.seed` first.")
 
-        data = load_seed()
+        data = load_seed(seed_file)
 
         version = ReferenceDataVersion(
             effective_from=datetime.combine(
@@ -66,4 +68,6 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--file", required=True, type=Path, help="Path to your bootstrap JSON (kept outside the repo).")
+    asyncio.run(main(parser.parse_args().file))
