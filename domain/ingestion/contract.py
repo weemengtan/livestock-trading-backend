@@ -4,10 +4,10 @@ workbook must look like for this system to read it.
 Business rule: the app reads the Active Orders block of one visible tab and
 nothing else — no other tab, and nothing below the ORDERS LOADED marker.
 Nothing else in `domain/ingestion` hard-codes a sheet name or marker; it
-all comes from an `IngestionContract` handed to `parse()`. A future change
-(the abattoir renames the tab, a marker changes) is a change to this
-contract, not to parser logic. The contract carries a version so each
-snapshot can record which one it was parsed under.
+all comes from an `IngestionContract` handed to `parse()`. At runtime that
+is the single active, versioned, audited row in Postgres. A future change
+(the abattoir renames the tab, a marker changes) is a new contract version,
+not a code change. Each snapshot records the version it was parsed under.
 """
 
 from dataclasses import dataclass
@@ -24,6 +24,9 @@ class IngestionContract:
     required_columns: dict[str, str]
 
 
+# Test baseline only: the runtime always loads the active contract from Postgres
+# (services/ingestion_contract_service.py); the first row is seeded by an
+# Alembic migration with these same values. parse() takes no default.
 DEFAULT_CONTRACT = IngestionContract(
     version="profitability-analysis-active-v1",
     required_sheet_name="Profitability Analysis",

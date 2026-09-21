@@ -21,7 +21,7 @@ from openpyxl.utils.exceptions import InvalidFileException
 from domain.engine.workings import Lifecycle
 from domain.ingestion import cells
 from domain.ingestion.benchmark import classify_benchmark_header
-from domain.ingestion.contract import DEFAULT_CONTRACT, IngestionContract
+from domain.ingestion.contract import IngestionContract
 from domain.ingestion.errors import IngestionContractError, IngestionErrorCode
 from domain.ingestion.headers import find_header_row, normalise
 from domain.ingestion.layout import DetectedLayout, locate_active_section
@@ -153,7 +153,7 @@ def parse(
     file_bytes: bytes,
     *,
     filename: str,
-    contract: IngestionContract = DEFAULT_CONTRACT,
+    contract: IngestionContract,
 ) -> ParsedSnapshot:
     sheet_values = _load_required_sheet(file_bytes, contract, data_only=True)
     sheet_formulas = _load_required_sheet(file_bytes, contract, data_only=False)

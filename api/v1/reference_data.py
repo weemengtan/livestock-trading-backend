@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.deps import CurrentUser, require_role
 from core.db import get_db
 from core.reference_data import get_operational_constants, get_saleyard_calendar
+from domain.engine.dnbp import available_model_types
 from models.enums import Role
 from schemas.reference_data import (
     ActiveConfigResponse,
@@ -39,6 +40,8 @@ async def get_active(current: CurrentUser = Depends(_trading_console), db: Async
     return ActiveConfigResponse(
         ref_data_version=config.ref_data_version,
         ref_data_version_id=config.version_id,
+        model_type=config.model_type,
+        available_model_types=list(available_model_types()),
         cif_buffer_per_kg=config.cif_buffer_per_kg,
         dnbp_factor_by_species=config.dnbp_factor_by_species,
         standard_weight_by_species=config.standard_weight_by_species,
@@ -82,6 +85,7 @@ async def create_version(
         effective_from=body.effective_from,
         note=body.note,
         raw_entries=[(e.table_key, e.key1, e.key2, e.value, e.text_value) for e in body.entries],
+        model_type=body.model_type,
     )
     await db.commit()
     return version

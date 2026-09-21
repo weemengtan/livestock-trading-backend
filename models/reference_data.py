@@ -47,6 +47,8 @@ class ReferenceDataVersion(TimestampedBase):
     effective_from: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), default=None)
     note: Mapped[str | None] = mapped_column(String, default=None)
+    # Which whitelisted DNBP formula (domain/engine/dnbp.py) this version selects.
+    model_type: Mapped[str] = mapped_column(String, default="FACTOR_AFTER_BUFFER", server_default="FACTOR_AFTER_BUFFER")
     is_active: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     activated_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), default=None)

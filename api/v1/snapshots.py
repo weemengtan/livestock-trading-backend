@@ -11,7 +11,6 @@ from core.db import get_db
 from core.errors import Conflict, NotFound
 from domain.engine.issues import Severity
 from domain.engine.workings import Lifecycle
-from domain.ingestion.contract import DEFAULT_CONTRACT
 from models.enums import Role, SnapshotStatus
 from repositories import order_lines as order_lines_repo
 from repositories import order_snapshots as order_snapshots_repo
@@ -27,6 +26,7 @@ from schemas.snapshots import (
     UploadPreviewResponse,
 )
 from services import audit_service, calculate_service, ingestion_service, issue_acknowledgment_service
+from services.ingestion_contract_service import get_active_contract
 
 router = APIRouter(prefix="/snapshots", tags=["snapshots"])
 
@@ -75,11 +75,12 @@ async def _get_owned_snapshot(db: AsyncSession, snapshot_id: uuid.UUID, org_id: 
 
 
 @router.get("/ingestion-contract", response_model=IngestionContractResponse)
-async def get_ingestion_contract(current: CurrentUser = Depends(_trading_console)) -> IngestionContractResponse:
+async def get_ingestion_contract(
+    current: CurrentUser = Depends(_trading_console), db: AsyncSession = Depends(get_db)
+) -> IngestionContractResponse:
     # Declared before the `/{snapshot_id}` route so it is not captured as an id.
-    return IngestionContractResponse(
-        version=DEFAULT_CONTRACT.version, required_sheet_name=DEFAULT_CONTRACT.required_sheet_name
-    )
+    contract = await get_active_contract(db)
+    return IngestionContractResponse(version=contract.version, required_sheet_name=contract.required_sheet_name)
 
 
 @router.post("/upload", response_model=UploadPreviewResponse)

@@ -16,6 +16,10 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+# The DNBP formula a reference-data version selects. The implementations are a
+# whitelist in domain/engine/dnbp.py; the version only names one.
+DEFAULT_MODEL_TYPE = "FACTOR_AFTER_BUFFER"
+
 
 def _to_decimal(value: Any) -> Decimal:
     """Convert via str() so a JSON float's binary imprecision is never
@@ -33,6 +37,7 @@ class EverhealthConfig:
     # (None for a config built from values/seed in tests). Stamped onto every
     # computed workings row so a result names the exact version it used.
     version_id: str | None = None
+    model_type: str = DEFAULT_MODEL_TYPE
 
     @classmethod
     def from_values(
@@ -43,6 +48,7 @@ class EverhealthConfig:
         standard_weight_by_species: dict[str, Any] | None = None,
         ref_data_version: str = "unversioned",
         version_id: str | None = None,
+        model_type: str = DEFAULT_MODEL_TYPE,
     ) -> "EverhealthConfig":
         return cls(
             cif_buffer_per_kg=_to_decimal(cif_buffer_per_kg),
@@ -50,6 +56,7 @@ class EverhealthConfig:
             standard_weight_by_species={k: _to_decimal(v) for k, v in (standard_weight_by_species or {}).items()},
             ref_data_version=ref_data_version,
             version_id=version_id,
+            model_type=model_type,
         )
 
     @classmethod

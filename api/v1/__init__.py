@@ -7,6 +7,7 @@ from api.v1 import (
     buyer,
     correction_requests,
     health,
+    ingestion_contracts,
     market_intel,
     order_line_removals,
     order_lines,
@@ -27,6 +28,7 @@ api_router.include_router(order_line_removals.router)
 api_router.include_router(correction_requests.router)
 api_router.include_router(publications.router)
 api_router.include_router(reference_data.router)
+api_router.include_router(ingestion_contracts.router)
 api_router.include_router(buy_instructions.router)
 api_router.include_router(analytics.router)
 api_router.include_router(buyer.router)

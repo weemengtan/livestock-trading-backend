@@ -21,6 +21,7 @@ class ReferenceDataEntryInput(BaseModel):
 class CreateVersionRequest(BaseModel):
     effective_from: datetime
     note: str | None = None
+    model_type: str | None = None  # omitted = keep the active version's model
     entries: list[ReferenceDataEntryInput] = Field(min_length=1)
 
 
@@ -40,6 +41,7 @@ class ReferenceDataVersionResponse(BaseModel):
     effective_from: datetime
     created_by: uuid.UUID | None
     note: str | None
+    model_type: str
     is_active: bool
     activated_at: datetime | None
     activated_by: uuid.UUID | None
@@ -66,6 +68,8 @@ class ActiveConfigResponse(BaseModel):
 
     ref_data_version: str
     ref_data_version_id: str | None
+    model_type: str
+    available_model_types: list[str]
     cif_buffer_per_kg: Decimal
     dnbp_factor_by_species: dict[str, Decimal]
     standard_weight_by_species: dict[str, Decimal]

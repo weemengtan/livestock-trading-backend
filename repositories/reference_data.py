@@ -34,6 +34,7 @@ async def create_version(
     effective_from: datetime,
     created_by: uuid.UUID,
     note: str | None,
+    model_type: str,
     entries: list[tuple[ReferenceDataTableKey, str | None, str | None, Decimal, str | None]],
 ) -> ReferenceDataVersion:
     """A version is created whole, with its entries, and never edited
@@ -42,6 +43,7 @@ async def create_version(
         effective_from=effective_from,
         created_by=created_by,
         note=note,
+        model_type=model_type,
         is_active=False,
     )
     db.add(version)

@@ -175,6 +175,7 @@ async def calculate_snapshot(db: AsyncSession, snapshot: OrderSnapshot, *, actor
                 bing_dnbp_inputs={
                     "avg_price_aud": str(order_line.avg_price_aud) if order_line.avg_price_aud is not None else None,
                     "species": order_line.species,
+                    "model_type": config.model_type,
                     "cif_buffer_per_kg": str(config.cif_buffer_per_kg),
                     "dnbp_factor": (
                         str(workings.bing_dnbp_factor_used) if workings.bing_dnbp_factor_used is not None else None

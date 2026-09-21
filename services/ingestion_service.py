@@ -38,6 +38,7 @@ from repositories import order_lines as order_lines_repo
 from repositories import order_snapshots as order_snapshots_repo
 from repositories import users as users_repo
 from services import audit_service
+from services.ingestion_contract_service import get_active_contract
 
 _PREVIEW_KEY_PREFIX = "snapshot-preview:"
 
@@ -246,8 +247,9 @@ async def create_upload_preview(
 ) -> dict:
     previous_snapshot = await order_snapshots_repo.get_latest_for_org(db, org_id)
 
+    contract = await get_active_contract(db)
     try:
-        parsed = parse(file_bytes, filename=filename)
+        parsed = parse(file_bytes, filename=filename, contract=contract)
     except IngestionContractError as exc:
         raise IngestionRejected(exc) from exc
 

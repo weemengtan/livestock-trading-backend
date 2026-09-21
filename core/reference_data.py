@@ -93,6 +93,7 @@ async def get_active_everhealth_config(db: AsyncSession) -> EverhealthConfig:
         standard_weight_by_species=standard_weight_by_species,
         ref_data_version=version.effective_from.date().isoformat(),
         version_id=str(version.id),
+        model_type=version.model_type,
     )
 
 

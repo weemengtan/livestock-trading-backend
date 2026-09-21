@@ -14,7 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.config import settings
 from core.errors import AbattoirOwnedTable, AppError, FourEyesRequired, ImpactPreviewRequired, NotFound
 from core.reference_data import WEEKDAYS, get_active_everhealth_config
-from domain.engine.config import EverhealthConfig
+from domain.engine.config import DEFAULT_MODEL_TYPE, EverhealthConfig
+from domain.engine.dnbp import available_model_types
 from domain.engine.impact import ImpactLineInput, ImpactPreview, compute_impact
 from domain.engine.workings import Lifecycle
 from models.enums import ReferenceDataTableKey
@@ -118,6 +119,7 @@ async def create_version(
     effective_from: datetime,
     note: str | None,
     raw_entries: list[tuple[str, str | None, str | None, Decimal, str | None]],
+    model_type: str | None = None,
 ) -> ReferenceDataVersion:
     """Every version is a COMPLETE, standalone snapshot of the Everhealth
     config — same philosophy as order_snapshots being a full cumulative
@@ -132,6 +134,13 @@ async def create_version(
     merged: dict[tuple[ReferenceDataTableKey, str | None, str | None], tuple[Decimal, str | None]] = {}
 
     active_version = await reference_data_repo.get_active_version(db)
+    resolved_model_type = model_type or (active_version.model_type if active_version else DEFAULT_MODEL_TYPE)
+    if resolved_model_type not in available_model_types():
+        raise AppError(
+            "UNKNOWN_MODEL_TYPE",
+            f"'{resolved_model_type}' is not an implemented DNBP model. Available: {', '.join(available_model_types())}.",
+            422,
+        )
     if active_version is not None:
         for entry in await reference_data_repo.list_entries(db, active_version.id):
             merged[(entry.table_key, entry.key1, entry.key2)] = (entry.value, entry.text_value)
@@ -150,6 +159,7 @@ async def create_version(
         effective_from=effective_from,
         created_by=actor_id,
         note=note,
+        model_type=resolved_model_type,
         entries=resolved_entries,
     )
 
@@ -159,7 +169,10 @@ async def create_version(
         action="reference_data_version.created",
         entity="reference_data_version",
         entity_id=version.id,
-        after={"effective_from": effective_from.isoformat(), "note": note, "entry_count": len(resolved_entries)},
+        after={"effective_from": effective_from.isoformat(), "note": note,
+            "model_type": resolved_model_type,
+            "entry_count": len(resolved_entries),
+        },
     )
     return version
 
@@ -188,6 +201,7 @@ async def preview_impact(
         cif_buffer_per_kg=cif_buffer if cif_buffer is not None else old_config.cif_buffer_per_kg,
         dnbp_factor_by_species=factors,
         standard_weight_by_species=weights,
+        model_type=version.model_type,
     )
 
     latest_snapshot = await order_snapshots_repo.get_latest_for_org(db, org_id)
@@ -242,6 +256,6 @@ async def activate_version(db: AsyncSession, version_id: uuid.UUID, *, actor_id:
         entity="reference_data_version",
         entity_id=version.id,
         before={"previous_active_version_id": str(before_active.id) if before_active else None},
-        after={"activated_at": datetime.now(UTC).isoformat(), "created_by": str(version.created_by)},
+        after={"activated_at": datetime.now(UTC).isoformat(), "created_by": str(version.created_by), "model_type": version.model_type},
     )
     return version

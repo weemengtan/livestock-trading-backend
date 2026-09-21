@@ -3,6 +3,7 @@ from models.buy_entry import BuyEntry
 from models.buy_instruction import BuyInstruction, BuyInstructionLine, BuyInstructionLineFill
 from models.correction_request import CorrectionRequest
 from models.dnbp_publication import DnbpPublication, DnbpPublicationDelivery, DnbpPublicationLine
+from models.ingestion_contract import IngestionContractRecord
 from models.market_observation import MarketObservation
 from models.order_issue_acknowledgment import OrderIssueAcknowledgment
 from models.order_line import OrderLine
@@ -28,6 +29,7 @@ __all__ = [
     "BuyInstruction",
     "BuyInstructionLine",
     "BuyInstructionLineFill",
+    "IngestionContractRecord",
     "CorrectionRequest",
     "DnbpPublication",
     "DnbpPublicationDelivery",
