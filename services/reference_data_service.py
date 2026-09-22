@@ -46,6 +46,17 @@ _WRITABLE_TABLE_KEYS = {
     "buyer_weight_band_tolerance_pct": ReferenceDataTableKey.BUYER_WEIGHT_BAND_TOLERANCE_PCT,
     "stale_instruction_hours": ReferenceDataTableKey.STALE_INSTRUCTION_HOURS,
     "saleyard_calendar": ReferenceDataTableKey.SALEYARD_CALENDAR,
+    "dnbp_outlier_threshold_pct": ReferenceDataTableKey.DNBP_OUTLIER_THRESHOLD_PCT,
+    "dnbp_outlier_lookback_days": ReferenceDataTableKey.DNBP_OUTLIER_LOOKBACK_DAYS,
+    "analytics_trailing_days_for_rate": ReferenceDataTableKey.ANALYTICS_TRAILING_DAYS_FOR_RATE,
+    "delivery_escalation_minutes": ReferenceDataTableKey.DELIVERY_ESCALATION_MINUTES,
+    "entry_bounds_max_head_count": ReferenceDataTableKey.ENTRY_BOUNDS_MAX_HEAD_COUNT,
+    "entry_bounds_max_price_per_head": ReferenceDataTableKey.ENTRY_BOUNDS_MAX_PRICE_PER_HEAD,
+    "entry_bounds_weight_lower_multiple": ReferenceDataTableKey.ENTRY_BOUNDS_WEIGHT_LOWER_MULTIPLE,
+    "entry_bounds_weight_upper_multiple": ReferenceDataTableKey.ENTRY_BOUNDS_WEIGHT_UPPER_MULTIPLE,
+    "entry_bounds_fallback_weight_min_kg": ReferenceDataTableKey.ENTRY_BOUNDS_FALLBACK_WEIGHT_MIN_KG,
+    "entry_bounds_fallback_weight_max_kg": ReferenceDataTableKey.ENTRY_BOUNDS_FALLBACK_WEIGHT_MAX_KG,
+    "benchmark_compare_highlight_threshold_pct": ReferenceDataTableKey.BENCHMARK_COMPARE_HIGHLIGHT_THRESHOLD_PCT,
 }
 
 # Only these two can move `AC` — the impact-preview/second-confirmation
@@ -84,12 +95,29 @@ def validate_entry(table_key: ReferenceDataTableKey, key1: str | None, key2: str
     if table_key in (
         ReferenceDataTableKey.BID_CHECK_CLOSE_THRESHOLD_PCT,
         ReferenceDataTableKey.BUYER_WEIGHT_BAND_TOLERANCE_PCT,
+        ReferenceDataTableKey.DNBP_OUTLIER_THRESHOLD_PCT,
+        ReferenceDataTableKey.BENCHMARK_COMPARE_HIGHLIGHT_THRESHOLD_PCT,
     ):
         if not Decimal(0) < value <= Decimal(100):
             raise _invalid(f"{table_key.value} must be greater than 0 and at most 100 (a percentage).")
-    elif table_key == ReferenceDataTableKey.STALE_INSTRUCTION_HOURS:
+    elif table_key in (
+        ReferenceDataTableKey.STALE_INSTRUCTION_HOURS,
+        ReferenceDataTableKey.DNBP_OUTLIER_LOOKBACK_DAYS,
+        ReferenceDataTableKey.ANALYTICS_TRAILING_DAYS_FOR_RATE,
+        ReferenceDataTableKey.DELIVERY_ESCALATION_MINUTES,
+        ReferenceDataTableKey.ENTRY_BOUNDS_MAX_HEAD_COUNT,
+    ):
         if value <= 0 or value != value.to_integral_value():
-            raise _invalid("STALE_INSTRUCTION_HOURS must be a positive whole number of hours.")
+            raise _invalid(f"{table_key.value} must be a positive whole number.")
+    elif table_key in (
+        ReferenceDataTableKey.ENTRY_BOUNDS_MAX_PRICE_PER_HEAD,
+        ReferenceDataTableKey.ENTRY_BOUNDS_WEIGHT_LOWER_MULTIPLE,
+        ReferenceDataTableKey.ENTRY_BOUNDS_WEIGHT_UPPER_MULTIPLE,
+        ReferenceDataTableKey.ENTRY_BOUNDS_FALLBACK_WEIGHT_MIN_KG,
+        ReferenceDataTableKey.ENTRY_BOUNDS_FALLBACK_WEIGHT_MAX_KG,
+    ):
+        if value <= 0:
+            raise _invalid(f"{table_key.value} must be greater than 0.")
     elif table_key == ReferenceDataTableKey.SALEYARD_CALENDAR:
         if not key1 or not key1.strip():
             raise _invalid("A saleyard calendar row needs a saleyard name.")

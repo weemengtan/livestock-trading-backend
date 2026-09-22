@@ -40,6 +40,17 @@ class OperationalConstants:
     bid_check_close_threshold_pct: Decimal
     buyer_weight_band_tolerance_pct: Decimal
     stale_instruction_hours: int
+    dnbp_outlier_threshold_pct: Decimal
+    dnbp_outlier_lookback_days: int
+    analytics_trailing_days_for_rate: int
+    delivery_escalation_minutes: int
+    entry_bounds_max_head_count: int
+    entry_bounds_max_price_per_head: Decimal
+    entry_bounds_weight_lower_multiple: Decimal
+    entry_bounds_weight_upper_multiple: Decimal
+    entry_bounds_fallback_weight_min_kg: Decimal
+    entry_bounds_fallback_weight_max_kg: Decimal
+    benchmark_compare_highlight_threshold_pct: Decimal
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,6 +114,29 @@ async def get_operational_constants(db: AsyncSession) -> OperationalConstants:
         bid_check_close_threshold_pct=_scalar(entries, ReferenceDataTableKey.BID_CHECK_CLOSE_THRESHOLD_PCT),
         buyer_weight_band_tolerance_pct=_scalar(entries, ReferenceDataTableKey.BUYER_WEIGHT_BAND_TOLERANCE_PCT),
         stale_instruction_hours=int(_scalar(entries, ReferenceDataTableKey.STALE_INSTRUCTION_HOURS)),
+        dnbp_outlier_threshold_pct=_scalar(entries, ReferenceDataTableKey.DNBP_OUTLIER_THRESHOLD_PCT),
+        dnbp_outlier_lookback_days=int(_scalar(entries, ReferenceDataTableKey.DNBP_OUTLIER_LOOKBACK_DAYS)),
+        analytics_trailing_days_for_rate=int(
+            _scalar(entries, ReferenceDataTableKey.ANALYTICS_TRAILING_DAYS_FOR_RATE)
+        ),
+        delivery_escalation_minutes=int(_scalar(entries, ReferenceDataTableKey.DELIVERY_ESCALATION_MINUTES)),
+        entry_bounds_max_head_count=int(_scalar(entries, ReferenceDataTableKey.ENTRY_BOUNDS_MAX_HEAD_COUNT)),
+        entry_bounds_max_price_per_head=_scalar(entries, ReferenceDataTableKey.ENTRY_BOUNDS_MAX_PRICE_PER_HEAD),
+        entry_bounds_weight_lower_multiple=_scalar(
+            entries, ReferenceDataTableKey.ENTRY_BOUNDS_WEIGHT_LOWER_MULTIPLE
+        ),
+        entry_bounds_weight_upper_multiple=_scalar(
+            entries, ReferenceDataTableKey.ENTRY_BOUNDS_WEIGHT_UPPER_MULTIPLE
+        ),
+        entry_bounds_fallback_weight_min_kg=_scalar(
+            entries, ReferenceDataTableKey.ENTRY_BOUNDS_FALLBACK_WEIGHT_MIN_KG
+        ),
+        entry_bounds_fallback_weight_max_kg=_scalar(
+            entries, ReferenceDataTableKey.ENTRY_BOUNDS_FALLBACK_WEIGHT_MAX_KG
+        ),
+        benchmark_compare_highlight_threshold_pct=_scalar(
+            entries, ReferenceDataTableKey.BENCHMARK_COMPARE_HIGHLIGHT_THRESHOLD_PCT
+        ),
     )
 
 

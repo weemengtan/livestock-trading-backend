@@ -16,7 +16,7 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.reference_data import get_active_everhealth_config
+from core.reference_data import OperationalConstants, get_active_everhealth_config, get_operational_constants
 from domain.engine import crosscheck
 from domain.engine import issues as codes
 from domain.engine.issues import Severity, ValidationIssue, check_dnbp_outlier
@@ -32,8 +32,6 @@ from repositories import order_workings as order_workings_repo
 from repositories import publications as publications_repo
 from repositories import validation_issues as validation_issues_repo
 from services import audit_service, issue_acknowledgment_service
-
-DNBP_OUTLIER_LOOKBACK_DAYS = 30  # §5.7 — "> 15% off recent average" is a trailing 30-day species mean
 
 ENGINE_VERSION = "BingMultiplierV1"  # §5.6 — the one shipped, publishable engine method
 
@@ -118,24 +116,27 @@ def _hand_set_issues(order_line: OrderLine) -> list[ValidationIssue]:
 
 
 async def _check_dnbp_outlier(
-    db: AsyncSession, snapshot: OrderSnapshot, workings, species: str | None
+    db: AsyncSession, snapshot: OrderSnapshot, workings, species: str | None, constants: OperationalConstants
 ) -> list[ValidationIssue]:
     """§5.7 `DNBP_OUTLIER` — deferred by Phase 2's own instructions
     ("nothing has been published yet"); buildable now that
-    dnbp_publications/dnbp_publication_lines exist (Phase 3). The 30-day
+    dnbp_publications/dnbp_publication_lines exist (Phase 3). The trailing
     average is scoped to this org only — a species average from before
     this org's own publication history began is simply None (no history),
-    never a cross-org or synthetic baseline."""
+    never a cross-org or synthetic baseline. The lookback window and the
+    outlier threshold are both Everhealth-config-editable (reference_data's
+    DNBP_OUTLIER_LOOKBACK_DAYS / DNBP_OUTLIER_THRESHOLD_PCT)."""
     if workings is None or workings.bing_dnbp is None or species is None:
         return []
-    since = datetime.now(UTC) - timedelta(days=DNBP_OUTLIER_LOOKBACK_DAYS)
+    since = datetime.now(UTC) - timedelta(days=constants.dnbp_outlier_lookback_days)
     average = await publications_repo.recent_species_average(db, snapshot.org_id, species, since=since)
-    issue = check_dnbp_outlier(workings.bing_dnbp, average)
+    issue = check_dnbp_outlier(workings.bing_dnbp, average, constants.dnbp_outlier_threshold_pct)
     return [issue] if issue else []
 
 
 async def calculate_snapshot(db: AsyncSession, snapshot: OrderSnapshot, *, actor_id: uuid.UUID) -> dict:
     config = await get_active_everhealth_config(db)
+    constants = await get_operational_constants(db)
 
     lines = await order_lines_repo.list_by_snapshot(db, snapshot.id)
 
@@ -146,7 +147,7 @@ async def calculate_snapshot(db: AsyncSession, snapshot: OrderSnapshot, *, actor
 
         crosscheck_issues = _run_crosscheck(order_line)
         hand_set_issues = _hand_set_issues(order_line)
-        outlier_issues = await _check_dnbp_outlier(db, snapshot, workings, order_line.species)
+        outlier_issues = await _check_dnbp_outlier(db, snapshot, workings, order_line.species, constants)
 
         all_issues = [*engine_issues, *crosscheck_issues, *hand_set_issues, *outlier_issues]
 

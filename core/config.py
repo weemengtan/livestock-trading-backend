@@ -83,12 +83,6 @@ class Settings(BaseSettings):
     # ticket (e.g. in a browser history/log) is useless almost immediately.
     ws_ticket_ttl_seconds: int = 30
 
-    # Phase 3 — §10's "alert the publisher if unacknowledged after 15
-    # minutes" escalation threshold. Computed on demand (no worker/cron
-    # introduced this phase — see services/escalation.py), so this is read
-    # wherever a publication's delivery state is fetched.
-    delivery_escalation_minutes: int = 15
-
     # Phase 5 — §16 "Sentry on both tiers." Empty disables the SDK entirely
     # (main.py only calls sentry_sdk.init if this is set) — see
     # [[foss-only-software-stack]]: sentry.io's hosted SaaS is proprietary

@@ -54,12 +54,35 @@ class DnbpSpeciesLine(BaseModel):
     weight_band: WeightBand | None
 
 
+class EntryBoundsResponse(BaseModel):
+    max_head_count: int
+    max_price_per_head: str
+    weight_lower_multiple: str
+    weight_upper_multiple: str
+    fallback_weight_min_kg: str
+    fallback_weight_max_kg: str
+
+
+class BuyerConfigResponse(BaseModel):
+    """The buyer-relevant subset of reference_data's operational constants
+    (§6.7) — bundled onto DnbpCurrentResponse rather than a separate
+    endpoint so it rides the same cache-first offline mechanism
+    (frontend/lib/buyer/use-dnbp-current.ts) as the DNBP figures
+    themselves, with no extra network round trip needed at a saleyard with
+    patchy connectivity."""
+
+    bid_check_close_threshold_pct: str
+    stale_instruction_hours: int
+    entry_bounds: EntryBoundsResponse
+
+
 class DnbpCurrentResponse(BaseModel):
     publication_id: str
     published_at: str
     effective_from: str
     engine_version: str
     species: list[DnbpSpeciesLine]
+    buyer_config: BuyerConfigResponse
 
 
 class AckRequest(BaseModel):

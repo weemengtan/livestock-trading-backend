@@ -20,8 +20,8 @@ from decimal import ROUND_FLOOR, Decimal
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.config import settings
 from core.push import PushSubscriptionInfo, send_push
+from core.reference_data import get_operational_constants
 from models.dnbp_publication import DnbpPublication, DnbpPublicationLine
 from models.enums import DeliveryChannel, Role
 from repositories import publication_deliveries as deliveries_repo
@@ -48,11 +48,24 @@ async def buyer_safe_payload(db: AsyncSession, publication: DnbpPublication, lin
         db, publication.org_id, publication, lines
     )
     progress_by_species = {p.species: p for p in species_progress}
+    constants = await get_operational_constants(db)
     return {
         "publication_id": str(publication.id),
         "published_at": publication.published_at.isoformat(),
         "effective_from": publication.effective_from.isoformat(),
         "engine_version": publication.engine_version,
+        "buyer_config": {
+            "bid_check_close_threshold_pct": str(constants.bid_check_close_threshold_pct),
+            "stale_instruction_hours": constants.stale_instruction_hours,
+            "entry_bounds": {
+                "max_head_count": constants.entry_bounds_max_head_count,
+                "max_price_per_head": str(constants.entry_bounds_max_price_per_head),
+                "weight_lower_multiple": str(constants.entry_bounds_weight_lower_multiple),
+                "weight_upper_multiple": str(constants.entry_bounds_weight_upper_multiple),
+                "fallback_weight_min_kg": str(constants.entry_bounds_fallback_weight_min_kg),
+                "fallback_weight_max_kg": str(constants.entry_bounds_fallback_weight_max_kg),
+            },
+        },
         "species": [
             {
                 "species": line.species,
@@ -196,7 +209,8 @@ async def delivery_states(db: AsyncSession, publication: DnbpPublication) -> lis
     overdue-and-not-yet-escalated buyer gets escalated exactly when someone
     is actually looking at this state, not silently in the background."""
     buyers = await users_repo.list_users(db, role=Role.BUYER, is_active=True)
-    deadline = publication.published_at + timedelta(minutes=settings.delivery_escalation_minutes)
+    constants = await get_operational_constants(db)
+    deadline = publication.published_at + timedelta(minutes=constants.delivery_escalation_minutes)
     now = datetime.now(UTC)
 
     states = []

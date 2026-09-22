@@ -51,7 +51,6 @@ from schemas.analytics import (
 from services.buy_instruction_service import schw_kg_for_entries
 
 MONEY_ZERO = Decimal("0")
-TRAILING_DAYS_FOR_RATE = 7  # §3 of the approved plan — the buyer's rhythm is inherently weekly (§6.8)
 
 
 def headroom_captured_aud(entries: list) -> Decimal:
@@ -114,7 +113,8 @@ async def order_book(db: AsyncSession, org_id: uuid.UUID) -> OrderBookResponse:
     for entry in all_time_bought_entries:
         bought_by_species[entry.species] = bought_by_species.get(entry.species, 0) + entry.head_count
 
-    since_trailing = business_today() - timedelta(days=TRAILING_DAYS_FOR_RATE)
+    constants = await get_operational_constants(db)
+    since_trailing = business_today() - timedelta(days=constants.analytics_trailing_days_for_rate)
     trailing_entries = await analytics_repo.list_org_buy_entries(db, org_id, since=since_trailing)
     trailing_bought_by_species: dict[str, int] = {}
     for entry in trailing_entries:
@@ -125,7 +125,7 @@ async def order_book(db: AsyncSession, org_id: uuid.UUID) -> OrderBookResponse:
         required = required_by_species.get(species, MONEY_ZERO)
         bought = Decimal(bought_by_species.get(species, 0))
         remaining = max(required - bought, MONEY_ZERO)
-        trailing_rate = Decimal(trailing_bought_by_species.get(species, 0)) / TRAILING_DAYS_FOR_RATE
+        trailing_rate = Decimal(trailing_bought_by_species.get(species, 0)) / constants.analytics_trailing_days_for_rate
         days_of_cover = (remaining / trailing_rate) if trailing_rate > 0 else None
         species_rows.append(
             OrderBookSpeciesRow(

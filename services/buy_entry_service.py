@@ -55,12 +55,19 @@ async def enforce_entry_bounds(
     since a correction can reintroduce the same magnitude error a create
     would have been blocked for."""
     config = await get_active_everhealth_config(db)
+    constants = await get_operational_constants(db)
     violations = entry_bounds.check_entry_bounds(
         head_count=head_count,
         price_per_head=price_per_head,
         weight_kg=weight_kg,
         species=species,
         standard_weight_kg=config.standard_weight_by_species.get(species),
+        max_head_count=constants.entry_bounds_max_head_count,
+        max_price_per_head=constants.entry_bounds_max_price_per_head,
+        weight_lower_multiple=constants.entry_bounds_weight_lower_multiple,
+        weight_upper_multiple=constants.entry_bounds_weight_upper_multiple,
+        fallback_weight_min_kg=constants.entry_bounds_fallback_weight_min_kg,
+        fallback_weight_max_kg=constants.entry_bounds_fallback_weight_max_kg,
     )
     if violations:
         raise ImplausibleEntry(violations)

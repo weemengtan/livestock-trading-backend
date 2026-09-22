@@ -55,22 +55,18 @@ HAND_SET_VALUE = "HAND_SET_VALUE"
 # INFO
 WEIGHT_OUTLIER = "WEIGHT_OUTLIER"
 
-# DNBP_OUTLIER threshold (§5.7): "> 15% off recent average". Not
-# Everhealth-config-editable like the DNBP factor table — it's a fixed
-# statistical tripwire on the analysis, not a money-moving lever, so it
-# lives here as a plain constant rather than in EverhealthConfig.
-OUTLIER_THRESHOLD_PCT = Decimal("15")
-
-
-def check_dnbp_outlier(bing_dnbp: Decimal | None, recent_species_average: Decimal | None) -> ValidationIssue | None:
-    """§5.7 `DNBP_OUTLIER` (WARN) — "DNBP deviates > 15% from 30-day
-    species mean". Deliberately NOT part of compute_order_workings/
+def check_dnbp_outlier(
+    bing_dnbp: Decimal | None, recent_species_average: Decimal | None, outlier_threshold_pct: Decimal
+) -> ValidationIssue | None:
+    """§5.7 `DNBP_OUTLIER` (WARN) — "DNBP deviates > threshold% from the
+    trailing species mean". Deliberately NOT part of compute_order_workings/
     _compute_active_line_workings: that function is pure and has no
-    database access, and a 30-day trailing average can only ever come from
-    a DB query over past dnbp_publication_lines rows (Phase 3). The caller
-    (services/calculate_service.py) fetches that average and passes it in
-    here; this function stays a pure comparison, same discipline as the
-    rest of this module.
+    database access, and a trailing average can only ever come from a DB
+    query over past dnbp_publication_lines rows (Phase 3). The caller
+    (services/calculate_service.py) fetches that average and the
+    Everhealth-config-editable threshold (reference_data's
+    DNBP_OUTLIER_THRESHOLD_PCT) and passes both in here; this function
+    stays a pure comparison, same discipline as the rest of this module.
 
     Returns None (no issue) whenever there's nothing to compare against —
     e.g. no publication history yet for this species — never a guessed or
@@ -79,7 +75,7 @@ def check_dnbp_outlier(bing_dnbp: Decimal | None, recent_species_average: Decima
         return None
 
     deviation_pct = abs(bing_dnbp - recent_species_average) / recent_species_average * 100
-    if deviation_pct <= OUTLIER_THRESHOLD_PCT:
+    if deviation_pct <= outlier_threshold_pct:
         return None
 
     return ValidationIssue(

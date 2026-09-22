@@ -17,7 +17,18 @@ Expected shape (values are yours to supply):
         "operational_constants": {
           "bid_check_close_threshold_pct": <number>,
           "buyer_weight_band_tolerance_pct": <number>,
-          "stale_instruction_hours": <integer>
+          "stale_instruction_hours": <integer>,
+          "dnbp_outlier_threshold_pct": <number>,
+          "dnbp_outlier_lookback_days": <integer>,
+          "analytics_trailing_days_for_rate": <integer>,
+          "delivery_escalation_minutes": <integer>,
+          "entry_bounds_max_head_count": <integer>,
+          "entry_bounds_max_price_per_head": <number>,
+          "entry_bounds_weight_lower_multiple": <number>,
+          "entry_bounds_weight_upper_multiple": <number>,
+          "entry_bounds_fallback_weight_min_kg": <number>,
+          "entry_bounds_fallback_weight_max_kg": <number>,
+          "benchmark_compare_highlight_threshold_pct": <number>
         },
         "saleyard_calendar": {"values": [
           {"saleyard": "<name>", "day": "MONDAY", "prepayment_aud": <number>, "note": "<text or null>"}
@@ -58,6 +69,83 @@ def seed_entries(seed: dict) -> list[SeedEntry]:
             None,
         ),
         (key.STALE_INSTRUCTION_HOURS, None, None, Decimal(str(constants["stale_instruction_hours"])), None),
+        (
+            key.DNBP_OUTLIER_THRESHOLD_PCT,
+            None,
+            None,
+            Decimal(str(constants["dnbp_outlier_threshold_pct"])),
+            None,
+        ),
+        (
+            key.DNBP_OUTLIER_LOOKBACK_DAYS,
+            None,
+            None,
+            Decimal(str(constants["dnbp_outlier_lookback_days"])),
+            None,
+        ),
+        (
+            key.ANALYTICS_TRAILING_DAYS_FOR_RATE,
+            None,
+            None,
+            Decimal(str(constants["analytics_trailing_days_for_rate"])),
+            None,
+        ),
+        (
+            key.DELIVERY_ESCALATION_MINUTES,
+            None,
+            None,
+            Decimal(str(constants["delivery_escalation_minutes"])),
+            None,
+        ),
+        (
+            key.ENTRY_BOUNDS_MAX_HEAD_COUNT,
+            None,
+            None,
+            Decimal(str(constants["entry_bounds_max_head_count"])),
+            None,
+        ),
+        (
+            key.ENTRY_BOUNDS_MAX_PRICE_PER_HEAD,
+            None,
+            None,
+            Decimal(str(constants["entry_bounds_max_price_per_head"])),
+            None,
+        ),
+        (
+            key.ENTRY_BOUNDS_WEIGHT_LOWER_MULTIPLE,
+            None,
+            None,
+            Decimal(str(constants["entry_bounds_weight_lower_multiple"])),
+            None,
+        ),
+        (
+            key.ENTRY_BOUNDS_WEIGHT_UPPER_MULTIPLE,
+            None,
+            None,
+            Decimal(str(constants["entry_bounds_weight_upper_multiple"])),
+            None,
+        ),
+        (
+            key.ENTRY_BOUNDS_FALLBACK_WEIGHT_MIN_KG,
+            None,
+            None,
+            Decimal(str(constants["entry_bounds_fallback_weight_min_kg"])),
+            None,
+        ),
+        (
+            key.ENTRY_BOUNDS_FALLBACK_WEIGHT_MAX_KG,
+            None,
+            None,
+            Decimal(str(constants["entry_bounds_fallback_weight_max_kg"])),
+            None,
+        ),
+        (
+            key.BENCHMARK_COMPARE_HIGHLIGHT_THRESHOLD_PCT,
+            None,
+            None,
+            Decimal(str(constants["benchmark_compare_highlight_threshold_pct"])),
+            None,
+        ),
     ]
     for species, factor in everhealth["dnbp_factor_by_species"]["values"].items():
         entries.append((key.DNBP_FACTOR, species, None, Decimal(str(factor)), None))

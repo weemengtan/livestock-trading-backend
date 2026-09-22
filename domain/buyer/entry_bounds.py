@@ -18,23 +18,6 @@ untouched by this module."""
 
 from decimal import Decimal
 
-MAX_HEAD_COUNT = 2000
-MAX_PRICE_PER_HEAD = Decimal("10000")
-
-# When a species has a configured standard_weight_by_species, the
-# plausible per-head weight band is that value's 0.2x-5x — generous next
-# to the ±15% buyer_weight_band_tolerance_pct already published to buyers
-# (that band stays informational-only; this is a much wider outer net).
-WEIGHT_LOWER_MULTIPLE = Decimal("0.2")
-WEIGHT_UPPER_MULTIPLE = Decimal("5")
-
-# Fallback when no standard weight is configured for the species (open
-# registry, §6.9 — a species can be traded before any reference weight
-# exists for it): a flat range wide enough to cover any commonly traded
-# livestock species' per-head carcass weight.
-FALLBACK_WEIGHT_MIN_KG = Decimal("1")
-FALLBACK_WEIGHT_MAX_KG = Decimal("500")
-
 
 def check_entry_bounds(
     *,
@@ -43,24 +26,35 @@ def check_entry_bounds(
     weight_kg: Decimal,
     species: str,
     standard_weight_kg: Decimal | None,
+    max_head_count: int,
+    max_price_per_head: Decimal,
+    weight_lower_multiple: Decimal,
+    weight_upper_multiple: Decimal,
+    fallback_weight_min_kg: Decimal,
+    fallback_weight_max_kg: Decimal,
 ) -> list[str]:
     """Returns every bound the entry falls outside of (usually one, but a
     genuinely bad entry — extra zeros on both price and weight — can fail
     more than one at once; reporting all of them beats making the buyer
-    fix-and-resubmit repeatedly)."""
+    fix-and-resubmit repeatedly).
+
+    All six bounds are Everhealth-config-editable (reference_data's
+    ENTRY_BOUNDS_* keys) — the caller (services/buy_entry_service.py)
+    fetches them and passes them in; this function stays a pure
+    comparison, same discipline as the rest of this module."""
     violations: list[str] = []
 
-    if not (1 <= head_count <= MAX_HEAD_COUNT):
-        violations.append(f"No. of Heads must be between 1 and {MAX_HEAD_COUNT}.")
+    if not (1 <= head_count <= max_head_count):
+        violations.append(f"No. of Heads must be between 1 and {max_head_count}.")
 
-    if not (0 < price_per_head <= MAX_PRICE_PER_HEAD):
-        violations.append(f"Price per head must be between $0 and ${MAX_PRICE_PER_HEAD:,.0f}.")
+    if not (0 < price_per_head <= max_price_per_head):
+        violations.append(f"Price per head must be between $0 and ${max_price_per_head:,.0f}.")
 
     if standard_weight_kg is not None and standard_weight_kg > 0:
-        weight_min = standard_weight_kg * WEIGHT_LOWER_MULTIPLE
-        weight_max = standard_weight_kg * WEIGHT_UPPER_MULTIPLE
+        weight_min = standard_weight_kg * weight_lower_multiple
+        weight_max = standard_weight_kg * weight_upper_multiple
     else:
-        weight_min, weight_max = FALLBACK_WEIGHT_MIN_KG, FALLBACK_WEIGHT_MAX_KG
+        weight_min, weight_max = fallback_weight_min_kg, fallback_weight_max_kg
 
     if not (weight_min <= weight_kg <= weight_max):
         violations.append(f"Weight for {species} must be between {weight_min:.1f}kg and {weight_max:.1f}kg per head.")

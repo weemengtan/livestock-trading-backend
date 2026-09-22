@@ -70,6 +70,23 @@ class ReferenceDataVersionDetailResponse(ReferenceDataVersionResponse):
     entries: list[ReferenceDataEntryResponse]
 
 
+class ReferenceDataAuditEntryResponse(BaseModel):
+    """`GET /reference-data/versions/{id}/audit` — one row per audit_log
+    entry for this version (created / impact_previewed / activated).
+    `actor_email` is resolved server-side rather than left as a bare
+    actor_id, since the reference-data router is OWNER+ACCOUNTANT but
+    `GET /users` (the only place a UUID could otherwise be resolved to an
+    email) is OWNER-only — an ACCOUNTANT viewing this must still see who
+    did what without needing that separate, more-privileged endpoint."""
+
+    id: uuid.UUID
+    action: str
+    at: datetime
+    actor_email: str | None
+    before: dict | None
+    after: dict | None
+
+
 class SaleyardCalendarRow(BaseModel):
     saleyard: str
     day: str
@@ -91,6 +108,17 @@ class ActiveConfigResponse(BaseModel):
     bid_check_close_threshold_pct: Decimal
     buyer_weight_band_tolerance_pct: Decimal
     stale_instruction_hours: int
+    dnbp_outlier_threshold_pct: Decimal
+    dnbp_outlier_lookback_days: int
+    analytics_trailing_days_for_rate: int
+    delivery_escalation_minutes: int
+    entry_bounds_max_head_count: int
+    entry_bounds_max_price_per_head: Decimal
+    entry_bounds_weight_lower_multiple: Decimal
+    entry_bounds_weight_upper_multiple: Decimal
+    entry_bounds_fallback_weight_min_kg: Decimal
+    entry_bounds_fallback_weight_max_kg: Decimal
+    benchmark_compare_highlight_threshold_pct: Decimal
     saleyard_calendar: list["SaleyardCalendarRow"]
     owner: str = "EVERHEALTH"
 
