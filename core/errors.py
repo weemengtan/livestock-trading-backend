@@ -4,13 +4,29 @@ from typing import Any
 class AppError(Exception):
     """Raise this anywhere in services/routes for a domain-level failure.
     A single exception handler in main.py turns it into §9's envelope:
-    { "error": { "code", "message", "details" } }."""
+    { "error": { "code", "message", "details" } }.
 
-    def __init__(self, code: str, message: str, status_code: int = 400, details: Any = None) -> None:
+    `retriable` defaults to False: every AppError is a structured, named
+    domain rejection (invalid input, a business rule not met, a resource
+    that doesn't exist) — deterministic given the same payload, so retrying
+    it unchanged will never succeed. This matters specifically for the
+    offline-sync per-item paths (services/buy_entry_service.py::bulk_sync,
+    services/market_observation_service.py::bulk_sync): they read this
+    flag to decide whether a failed queued item goes back to "queued" for
+    the next auto-retry, or to a terminal "failed" state that stops
+    retrying and asks the buyer to fix or discard it. Only an unstructured,
+    unexpected exception (not an AppError at all — a real infra/network
+    hiccup) should be treated as retriable; nothing here overrides that
+    default, on purpose."""
+
+    def __init__(
+        self, code: str, message: str, status_code: int = 400, details: Any = None, *, retriable: bool = False
+    ) -> None:
         self.code = code
         self.message = message
         self.status_code = status_code
         self.details = details
+        self.retriable = retriable
         super().__init__(message)
 
 
@@ -270,3 +286,19 @@ class IngestionRejected(AppError):
 
     def __init__(self, error) -> None:
         super().__init__(error.code.value, error.message, status_code=422, details=error.details)
+
+
+class ImplausibleEntry(AppError):
+    """domain.buyer.entry_bounds's sanity net — the entry's head_count,
+    price_per_head, or weight_kg is outside a deliberately loose plausible
+    range, almost certainly a data-entry error (extra zeros, wrong unit)
+    rather than a genuine trade. `details.violations` lists every bound
+    that was missed, not just the first."""
+
+    def __init__(self, violations: list[str]) -> None:
+        super().__init__(
+            "IMPLAUSIBLE_ENTRY",
+            "This entry looks implausible — check the numbers before saving.",
+            status_code=422,
+            details={"violations": violations},
+        )

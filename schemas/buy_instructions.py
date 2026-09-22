@@ -66,6 +66,7 @@ class BuyInstructionResponse(BaseModel):
 
 class SaleyardReconciliationResponse(BaseModel):
     saleyard: str
+    species: str
     schw_kg: Decimal
     heads: int
     actual_cost: Decimal
@@ -87,3 +88,18 @@ class ReconciliationResponse(BaseModel):
     week_end: date
     by_saleyard: list[SaleyardReconciliationResponse]
     summary: ReconciliationSummaryResponse
+
+
+class ReconciliationEntryResponse(BaseModel):
+    id: uuid.UUID
+    buyer_email: str
+    trade_date: date
+    agent: str | None
+    pen: str | None
+    head_count: int
+    price_per_head: Decimal
+    weight_kg: Decimal
+    implied_price_per_kg: Decimal
+    is_breach: bool
+    breach_reason: str | None
+    client_created_at: datetime

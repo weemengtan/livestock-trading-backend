@@ -235,6 +235,18 @@ async def patch_entry(
     if body.weight_kg is not None:
         entry.weight_kg = body.weight_kg
 
+    if body.head_count is not None or rescored:
+        # A correction can reintroduce the same magnitude error a create
+        # would have been blocked for — check the resulting state, not
+        # just whatever field this particular PATCH happened to touch.
+        await buy_entry_service.enforce_entry_bounds(
+            db,
+            species=entry.species,
+            head_count=entry.head_count,
+            price_per_head=entry.price_per_head,
+            weight_kg=entry.weight_kg,
+        )
+
     if rescored:
         # Rescored against the FROZEN dnbp_at_entry, never a re-fetched
         # publication (§12.4's non-negotiable) — this is only correcting a

@@ -167,15 +167,17 @@ def render_xlsx(data: BuyInstructionExportData) -> bytes:
     ws.cell(row=row, column=2, value=recon_title).font = bold
     row += 1
     ws.cell(row=row, column=2, value="Saleyard").font = bold
-    ws.cell(row=row, column=3, value="SCHW").font = bold
-    ws.cell(row=row, column=4, value="Heads").font = bold
-    ws.cell(row=row, column=5, value="Actual Cost").font = bold
+    ws.cell(row=row, column=3, value="Species").font = bold
+    ws.cell(row=row, column=4, value="SCHW").font = bold
+    ws.cell(row=row, column=5, value="Heads").font = bold
+    ws.cell(row=row, column=6, value="Actual Cost").font = bold
     row += 1
     for r in data.reconciliation:
         ws.cell(row=row, column=2, value=r.saleyard)
-        ws.cell(row=row, column=3, value=float(r.schw_kg))
-        ws.cell(row=row, column=4, value=r.heads)
-        ws.cell(row=row, column=5, value=float(r.actual_cost))
+        ws.cell(row=row, column=3, value=r.species)
+        ws.cell(row=row, column=4, value=float(r.schw_kg))
+        ws.cell(row=row, column=5, value=r.heads)
+        ws.cell(row=row, column=6, value=float(r.actual_cost))
         row += 1
 
     # Summary block
@@ -278,9 +280,9 @@ def render_pdf(data: BuyInstructionExportData) -> bytes:
     elements.append(
         Paragraph(f"Reconciliation ({data.week_start.isoformat()} to {data.week_end.isoformat()})", styles["Heading3"])
     )
-    recon_rows = [["Saleyard", "SCHW", "Heads", "Actual Cost"]]
+    recon_rows = [["Saleyard", "Species", "SCHW", "Heads", "Actual Cost"]]
     for r in data.reconciliation:
-        recon_rows.append([r.saleyard, f"{r.schw_kg:,.2f}", str(r.heads), f"{r.actual_cost:,.2f}"])
+        recon_rows.append([r.saleyard, r.species, f"{r.schw_kg:,.2f}", str(r.heads), f"{r.actual_cost:,.2f}"])
     recon_table = Table(recon_rows, repeatRows=1)
     recon_table.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.5, colors.grey), ("FONTSIZE", (0, 0), (-1, -1), 8)]))
     elements.append(recon_table)

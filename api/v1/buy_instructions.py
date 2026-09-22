@@ -28,6 +28,7 @@ from schemas.buy_instructions import (
     FillResponse,
     GenerateBuyInstructionRequest,
     PatchBuyInstructionRequest,
+    ReconciliationEntryResponse,
     ReconciliationResponse,
     ReconciliationSummaryResponse,
     SaleyardReconciliationResponse,
@@ -240,7 +241,7 @@ async def get_reconciliation(
         week_end=week_end,
         by_saleyard=[
             SaleyardReconciliationResponse(
-                saleyard=r.saleyard, schw_kg=r.schw_kg, heads=r.heads, actual_cost=r.actual_cost
+                saleyard=r.saleyard, species=r.species, schw_kg=r.schw_kg, heads=r.heads, actual_cost=r.actual_cost
             )
             for r in rows
         ],
@@ -255,6 +256,37 @@ async def get_reconciliation(
             cost_variance=summary.cost_variance,
         ),
     )
+
+
+@router.get("/{instruction_id}/reconciliation/entries", response_model=list[ReconciliationEntryResponse])
+async def get_reconciliation_entries(
+    instruction_id: uuid.UUID,
+    saleyard: str,
+    species: str,
+    current: CurrentUser = Depends(_trading_console),
+    db: AsyncSession = Depends(get_db),
+) -> list[ReconciliationEntryResponse]:
+    instruction = await _get_owned(db, instruction_id, current.org_id)
+    entries = await buy_instruction_service.list_reconciliation_entries(
+        db, instruction, saleyard=saleyard, species=species
+    )
+    return [
+        ReconciliationEntryResponse(
+            id=e.id,
+            buyer_email=e.buyer_email,
+            trade_date=e.trade_date,
+            agent=e.agent,
+            pen=e.pen,
+            head_count=e.head_count,
+            price_per_head=e.price_per_head,
+            weight_kg=e.weight_kg,
+            implied_price_per_kg=e.implied_price_per_kg,
+            is_breach=e.is_breach,
+            breach_reason=e.breach_reason,
+            client_created_at=e.client_created_at,
+        )
+        for e in entries
+    ]
 
 
 @router.get("/{instruction_id}/export")

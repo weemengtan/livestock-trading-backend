@@ -18,6 +18,7 @@ same module as the trading-console models.
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -83,6 +84,8 @@ class BulkObservationSyncItemResult(BaseModel):
     is_possible_duplicate: bool | None = None
     error_code: str | None = None
     error_message: str | None = None
+    retriable: bool | None = None
+    details: dict[str, Any] | None = None
 
 
 class MarketObservationResponse(BaseModel):

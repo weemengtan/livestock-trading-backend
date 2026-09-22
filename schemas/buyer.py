@@ -11,6 +11,7 @@ appear.
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -166,6 +167,8 @@ class BulkSyncItemResult(BaseModel):
     is_possible_duplicate: bool | None = None
     error_code: str | None = None
     error_message: str | None = None
+    retriable: bool | None = None
+    details: dict[str, Any] | None = None
 
 
 class SaleyardSpendRow(BaseModel):

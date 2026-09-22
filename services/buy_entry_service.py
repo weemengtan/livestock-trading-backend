@@ -14,8 +14,9 @@ from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.business_time import capture_date
-from core.errors import Conflict, NotFound
-from core.reference_data import get_operational_constants
+from core.errors import Conflict, ImplausibleEntry, NotFound
+from core.reference_data import get_active_everhealth_config, get_operational_constants
+from domain.buyer import entry_bounds
 from domain.buyer.bidcheck import score_bid
 from models.buy_entry import BuyEntry
 from repositories import buy_entries as buy_entries_repo
@@ -46,6 +47,25 @@ class BuyEntryResult:
     is_possible_duplicate: bool
 
 
+async def enforce_entry_bounds(
+    db: AsyncSession, *, species: str, head_count: int, price_per_head: Decimal, weight_kg: Decimal
+) -> None:
+    """The single choke point for domain.buyer.entry_bounds — used at
+    create time (below) and again on PATCH /entries/{id} (api/v1/buyer.py),
+    since a correction can reintroduce the same magnitude error a create
+    would have been blocked for."""
+    config = await get_active_everhealth_config(db)
+    violations = entry_bounds.check_entry_bounds(
+        head_count=head_count,
+        price_per_head=price_per_head,
+        weight_kg=weight_kg,
+        species=species,
+        standard_weight_kg=config.standard_weight_by_species.get(species),
+    )
+    if violations:
+        raise ImplausibleEntry(violations)
+
+
 async def create_or_sync_entry(
     db: AsyncSession, *, buyer_id: uuid.UUID, org_id: uuid.UUID, payload: BuyEntryInput
 ) -> BuyEntryResult:
@@ -55,6 +75,14 @@ async def create_or_sync_entry(
         # actually succeeded server-side but never got acknowledged back
         # to the client (§12.7). No re-scoring, no duplicate row.
         return BuyEntryResult(entry=existing, is_possible_duplicate=False)
+
+    await enforce_entry_bounds(
+        db,
+        species=payload.species,
+        head_count=payload.head_count,
+        price_per_head=payload.price_per_head,
+        weight_kg=payload.weight_kg,
+    )
 
     publication = await publications_repo.find_effective_as_of(db, org_id, payload.client_created_at)
     if publication is None:
@@ -134,7 +162,19 @@ async def bulk_sync(
         except Exception as exc:  # noqa: BLE001 — deliberately broad: this is a per-item result, not a route handler
             code = getattr(exc, "code", "SYNC_FAILED")
             message = getattr(exc, "message", str(exc))
+            # AppError.retriable defaults False (a structured domain
+            # rejection); an exception with no such attribute is something
+            # unexpected/unstructured — treat that as the transient case.
+            retriable = getattr(exc, "retriable", True)
+            details = getattr(exc, "details", None)
             results.append(
-                {"client_uuid": str(item.client_uuid), "ok": False, "error_code": code, "error_message": message}
+                {
+                    "client_uuid": str(item.client_uuid),
+                    "ok": False,
+                    "error_code": code,
+                    "error_message": message,
+                    "retriable": retriable,
+                    "details": details,
+                }
             )
     return results

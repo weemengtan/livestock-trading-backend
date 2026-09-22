@@ -91,14 +91,23 @@ async def list_fills_for_lines(db: AsyncSession, line_ids: list[uuid.UUID]) -> l
 
 
 async def list_org_buy_entries_in_window(
-    db: AsyncSession, org_id: uuid.UUID, *, week_start: date, week_end: date
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    *,
+    week_start: date,
+    week_end: date,
+    saleyard: str | None = None,
+    species: str | None = None,
 ) -> list[BuyEntry]:
     """§13.1's reconciliation/summary blocks (non-negotiable #6) — every
     buyer's entries across the whole org for the Melbourne Mon-Sun trading
     week containing the instruction's `trade_date`, not just one buyer's
     (unlike repositories/buy_entries.list_for_buyer, which is deliberately
-    scoped per-buyer for §2.2's own-data-only PWA routes)."""
-    result = await db.execute(
+    scoped per-buyer for §2.2's own-data-only PWA routes). `saleyard`/
+    `species` narrow to one reconciliation row's group, for the drill-down
+    into individual entries behind a saleyard+species figure — omitted, the
+    unfiltered call is what compute_reconciliation itself uses."""
+    stmt = (
         select(BuyEntry)
         .join(User, User.id == BuyEntry.buyer_id)
         .where(
@@ -108,4 +117,9 @@ async def list_org_buy_entries_in_window(
             BuyEntry.is_deleted.is_(False),
         )
     )
+    if saleyard is not None:
+        stmt = stmt.where(BuyEntry.saleyard == saleyard)
+    if species is not None:
+        stmt = stmt.where(BuyEntry.species == species)
+    result = await db.execute(stmt.order_by(BuyEntry.client_created_at))
     return list(result.scalars().all())

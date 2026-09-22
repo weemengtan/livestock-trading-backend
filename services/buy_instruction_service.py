@@ -44,6 +44,7 @@ from models.order_snapshot import OrderSnapshot
 from repositories import buy_instructions as buy_instructions_repo
 from repositories import order_snapshots as order_snapshots_repo
 from repositories import order_workings as order_workings_repo
+from repositories import users as users_repo
 from services import audit_service, publication_service
 
 MONEY_ZERO = Decimal("0")
@@ -283,6 +284,7 @@ def schw_kg_for_entries(entries: list) -> Decimal:
 @dataclass(slots=True)
 class SaleyardReconciliation:
     saleyard: str
+    species: str
     schw_kg: Decimal
     heads: int
     actual_cost: Decimal
@@ -306,29 +308,33 @@ async def compute_reconciliation(
     """§13.1's reconciliation and summary blocks, non-negotiable #6: live-
     computed on every read (never cached), scoped to the Melbourne Mon-Sun
     trading week containing `instruction.trade_date`, grouped by whichever
-    saleyards actually have `buy_entries` in that window — never hard-coded
-    to a fixed set of saleyard columns. "Actual Cost" is the livestock cost
-    only (price_per_head x head_count), the same basis as the received `V`
-    (`total_livestock_cost = L x F`, also excluding freight) — freight is
-    tracked separately per entry, not folded into this figure."""
+    saleyard+species pairs actually have `buy_entries` in that window — never
+    hard-coded to a fixed set of saleyard columns. Grouped by species as well
+    as saleyard (not saleyard alone) so unrelated species logged at the same
+    saleyard in the same week don't net against each other into one figure.
+    "Actual Cost" is the livestock cost only (price_per_head x head_count),
+    the same basis as the received `V` (`total_livestock_cost = L x F`, also
+    excluding freight) — freight is tracked separately per entry, not folded
+    into this figure."""
     lines = await buy_instructions_repo.list_lines(db, instruction.id)
     week_start, week_end = trading_week_bounds(instruction.trade_date)
     entries = await buy_instructions_repo.list_org_buy_entries_in_window(
         db, instruction.org_id, week_start=week_start, week_end=week_end
     )
 
-    by_saleyard: dict[str, list] = {}
+    by_saleyard_species: dict[tuple[str, str], list] = {}
     for entry in entries:
-        by_saleyard.setdefault(entry.saleyard, []).append(entry)
+        by_saleyard_species.setdefault((entry.saleyard, entry.species), []).append(entry)
 
     saleyard_rows = [
         SaleyardReconciliation(
             saleyard=saleyard,
+            species=species,
             schw_kg=schw_kg_for_entries(es),
             heads=sum(e.head_count for e in es),
             actual_cost=sum((e.price_per_head * e.head_count for e in es), MONEY_ZERO),
         )
-        for saleyard, es in sorted(by_saleyard.items())
+        for (saleyard, species), es in sorted(by_saleyard_species.items())
     ]
 
     ordered_schw = sum((line.schw_kg for line in lines), MONEY_ZERO)
@@ -349,6 +355,57 @@ async def compute_reconciliation(
         cost_variance=expected_cost - actual_cost,
     )
     return saleyard_rows, summary
+
+
+@dataclass(slots=True)
+class ReconciliationEntry:
+    id: uuid.UUID
+    buyer_email: str
+    trade_date: date
+    agent: str | None
+    pen: str | None
+    head_count: int
+    price_per_head: Decimal
+    weight_kg: Decimal
+    implied_price_per_kg: Decimal
+    is_breach: bool
+    breach_reason: str | None
+    client_created_at: datetime
+
+
+async def list_reconciliation_entries(
+    db: AsyncSession, instruction: BuyInstruction, *, saleyard: str, species: str
+) -> list[ReconciliationEntry]:
+    """Drill-down behind one saleyard+species row of compute_reconciliation
+    — the individual buy_entries that sum to that row's SCHW/Heads/Actual
+    Cost, for audit. Same window/scope as compute_reconciliation itself
+    (org-wide, Melbourne Mon-Sun trading week), narrowed to the one group."""
+    week_start, week_end = trading_week_bounds(instruction.trade_date)
+    entries = await buy_instructions_repo.list_org_buy_entries_in_window(
+        db, instruction.org_id, week_start=week_start, week_end=week_end, saleyard=saleyard, species=species
+    )
+    buyer_ids = {e.buyer_id for e in entries}
+    emails: dict[uuid.UUID, str] = {}
+    for buyer_id in buyer_ids:
+        user = await users_repo.get_by_id(db, buyer_id)
+        emails[buyer_id] = user.email if user is not None else "unknown"
+    return [
+        ReconciliationEntry(
+            id=e.id,
+            buyer_email=emails[e.buyer_id],
+            trade_date=e.trade_date,
+            agent=e.agent,
+            pen=e.pen,
+            head_count=e.head_count,
+            price_per_head=e.price_per_head,
+            weight_kg=e.weight_kg,
+            implied_price_per_kg=e.implied_price_per_kg,
+            is_breach=e.is_breach,
+            breach_reason=e.breach_reason,
+            client_created_at=e.client_created_at,
+        )
+        for e in entries
+    ]
 
 
 def line_balance(line: BuyInstructionLine, fills: list[BuyInstructionLineFill]) -> Decimal:

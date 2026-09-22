@@ -108,8 +108,19 @@ async def bulk_sync(
         except Exception as exc:  # noqa: BLE001 — deliberately broad: this is a per-item result, not a route handler
             code = getattr(exc, "code", "SYNC_FAILED")
             message = getattr(exc, "message", str(exc))
+            # Same retriable/terminal split as buy_entry_service.bulk_sync —
+            # see AppError.retriable's docstring.
+            retriable = getattr(exc, "retriable", True)
+            details = getattr(exc, "details", None)
             results.append(
-                {"client_uuid": str(item.client_uuid), "ok": False, "error_code": code, "error_message": message}
+                {
+                    "client_uuid": str(item.client_uuid),
+                    "ok": False,
+                    "error_code": code,
+                    "error_message": message,
+                    "retriable": retriable,
+                    "details": details,
+                }
             )
     return results
 
