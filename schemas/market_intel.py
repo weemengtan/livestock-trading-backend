@@ -23,8 +23,10 @@ from pydantic import BaseModel
 
 
 class MarketObservationCreateRequest(BaseModel):
+    """No `trade_date` — derived server-side from `client_created_at`, same as
+    schemas/buyer.py::BuyEntryCreateRequest."""
+
     saleyard: str
-    trade_date: date
     species: str
     competitor_name: str
     agent: str | None = None

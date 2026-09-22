@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from models.enums import SnapshotStatus
 
@@ -59,6 +59,13 @@ class CalculateResponse(BaseModel):
     correction_issues: int
     warnings: int
     correction_requests_auto_resolved: int
+
+
+MAX_ACKNOWLEDGE_BATCH = 1000
+
+
+class AcknowledgeIssuesRequest(BaseModel):
+    issue_ids: list[uuid.UUID] = Field(min_length=1, max_length=MAX_ACKNOWLEDGE_BATCH)
 
 
 class IssueResponse(BaseModel):

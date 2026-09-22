@@ -34,6 +34,7 @@ from schemas.buyer import (
     InstructionLineResponse,
     InstructionResponse,
     PushSubscriptionRequest,
+    SaleyardOption,
     ScorecardResponse,
     SpeciesOption,
 )
@@ -62,7 +63,6 @@ _buyer_only = require_role(Role.BUYER)
 def _to_input(body: BuyEntryCreateRequest) -> BuyEntryInput:
     return BuyEntryInput(
         saleyard=body.saleyard,
-        trade_date=body.trade_date,
         species=body.species,
         agent=body.agent,
         pen=body.pen,
@@ -107,7 +107,9 @@ def _to_entry_response(entry, *, is_possible_duplicate: bool = False) -> BuyEntr
 
 
 @router.get("/species", response_model=list[SpeciesOption])
-async def list_species(current: CurrentUser = Depends(_buyer_only), db: AsyncSession = Depends(get_db)) -> list[SpeciesOption]:
+async def list_species(
+    current: CurrentUser = Depends(_buyer_only), db: AsyncSession = Depends(get_db)
+) -> list[SpeciesOption]:
     """Market Intel's species picker (§ — office market-intelligence
     capture, no business transaction involved) reads the open registry
     directly, never DNBP's published species — a buyer logging a
@@ -115,6 +117,18 @@ async def list_species(current: CurrentUser = Depends(_buyer_only), db: AsyncSes
     and must work even on a species nothing has been published for."""
     rows = await registries_repo.list_species(db)
     return [SpeciesOption(code=row.code, display_name=row.display_name) for row in rows if row.is_active]
+
+
+@router.get("/saleyards", response_model=list[SaleyardOption])
+async def list_saleyards(
+    current: CurrentUser = Depends(_buyer_only), db: AsyncSession = Depends(get_db)
+) -> list[SaleyardOption]:
+    """§12.4's default saleyard: the active saleyard calendar's weekday ->
+    saleyard rows. The client picks today's row itself (Australia/Melbourne
+    local day) so the list can be cached and still resolve correctly offline
+    and across midnight; a day with no entry defaults to nothing."""
+    calendar = await get_saleyard_calendar(db)
+    return [SaleyardOption(saleyard=e.saleyard, day=e.day) for e in calendar]
 
 
 @router.get("/dnbp/current", response_model=DnbpCurrentResponse)

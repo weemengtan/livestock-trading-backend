@@ -32,3 +32,10 @@ async def list_by_snapshot(db: AsyncSession, snapshot_id: uuid.UUID) -> list[Val
 
 async def get_by_id(db: AsyncSession, issue_id: uuid.UUID) -> ValidationIssueRecord | None:
     return await db.get(ValidationIssueRecord, issue_id)
+
+
+async def list_by_ids(db: AsyncSession, issue_ids: list[uuid.UUID]) -> list[ValidationIssueRecord]:
+    if not issue_ids:
+        return []
+    result = await db.execute(select(ValidationIssueRecord).where(ValidationIssueRecord.id.in_(issue_ids)))
+    return list(result.scalars().all())

@@ -84,7 +84,9 @@ async def publish(
     # row that then failed to commit would be worse than a buyer who
     # briefly sees nothing (§10's redundancy exists to cover the reverse
     # failure mode, not this one).
-    await delivery_service.fan_out(db, redis, publication=publication, lines=lines, buyer_notified=publication.buyer_notified)
+    await delivery_service.fan_out(
+        db, redis, publication=publication, lines=lines, buyer_notified=publication.buyer_notified
+    )
     await db.commit()
 
     return await _to_detail(db, publication)

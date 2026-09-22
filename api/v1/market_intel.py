@@ -54,7 +54,6 @@ _trading_console = require_role(Role.OWNER, Role.ACCOUNTANT)
 def _to_input(body: MarketObservationCreateRequest) -> MarketObservationInput:
     return MarketObservationInput(
         saleyard=body.saleyard,
-        trade_date=body.trade_date,
         species=body.species,
         competitor_name=body.competitor_name,
         agent=body.agent,

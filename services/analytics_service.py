@@ -15,6 +15,7 @@ from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.business_time import business_today
 from core.reference_data import get_operational_constants
 from domain.engine.issues import Severity
 from repositories import analytics as analytics_repo
@@ -113,7 +114,7 @@ async def order_book(db: AsyncSession, org_id: uuid.UUID) -> OrderBookResponse:
     for entry in all_time_bought_entries:
         bought_by_species[entry.species] = bought_by_species.get(entry.species, 0) + entry.head_count
 
-    since_trailing = date.today() - timedelta(days=TRAILING_DAYS_FOR_RATE)
+    since_trailing = business_today() - timedelta(days=TRAILING_DAYS_FOR_RATE)
     trailing_entries = await analytics_repo.list_org_buy_entries(db, org_id, since=since_trailing)
     trailing_bought_by_species: dict[str, int] = {}
     for entry in trailing_entries:

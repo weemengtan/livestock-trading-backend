@@ -17,6 +17,7 @@ from repositories import order_workings as order_workings_repo
 from repositories import validation_issues as validation_issues_repo
 from schemas.order_lines import OrderLineResponse, OrderWorkingsResponse
 from schemas.snapshots import (
+    AcknowledgeIssuesRequest,
     CalculateResponse,
     CommitSnapshotRequest,
     IngestionContractResponse,
@@ -180,31 +181,11 @@ async def list_issues(
     return [IssueResponse.model_validate(i) for i in issues]
 
 
-@router.post("/{snapshot_id}/issues/{issue_id}/acknowledge", response_model=IssueResponse)
-async def acknowledge_issue(
-    snapshot_id: uuid.UUID,
-    issue_id: uuid.UUID,
-    current: CurrentUser = Depends(_trading_console),
-    db: AsyncSession = Depends(get_db),
-) -> IssueResponse:
-    """§5.7's publication gate, the other half of it: a WARN/CORRECTION
-    issue on an active line must be explicitly acknowledged, with the
-    acknowledger's id and a timestamp, before a publication can proceed
-    (services/publication_service.py enforces this). Deferred from Phase 2
-    by design — tied to publication, which didn't exist yet (§18)."""
-    await _get_owned_snapshot(db, snapshot_id, current.org_id)
-    issue = await validation_issues_repo.get_by_id(db, issue_id)
-    if issue is None:
-        raise NotFound("Issue")
-    order_line = await order_lines_repo.get_by_id(db, issue.order_line_id)
-    if order_line is None or order_line.snapshot_id != snapshot_id:
-        raise NotFound("Issue")
-    if issue.severity is Severity.BLOCK:
-        raise Conflict(
-            "CANNOT_ACKNOWLEDGE_BLOCK",
-            "A BLOCK issue cannot be acknowledged away — it can only be resolved by a corrected submission.",
-        )
-
+async def _acknowledge(
+    db: AsyncSession, issue, order_line, *, current: CurrentUser, snapshot_id: uuid.UUID
+) -> None:
+    """Stamps one issue acknowledged and records the durable, identity-keyed
+    decision plus its audit entry. Caller owns validation and the commit."""
     issue.acknowledged_by = current.user_id
     issue.acknowledged_at = datetime.now(UTC)
 
@@ -231,5 +212,68 @@ async def acknowledge_issue(
         entity_id=issue.id,
         after={"code": issue.code, "severity": issue.severity.value},
     )
+
+
+def _reject_block(issue) -> None:
+    if issue.severity is Severity.BLOCK:
+        raise Conflict(
+            "CANNOT_ACKNOWLEDGE_BLOCK",
+            "A BLOCK issue cannot be acknowledged away — it can only be resolved by a corrected submission.",
+        )
+
+
+@router.post("/{snapshot_id}/issues/acknowledge", response_model=list[IssueResponse])
+async def acknowledge_issues(
+    snapshot_id: uuid.UUID,
+    body: AcknowledgeIssuesRequest,
+    current: CurrentUser = Depends(_trading_console),
+    db: AsyncSession = Depends(get_db),
+) -> list[IssueResponse]:
+    """Bulk form of acknowledge_issue below, for the workbench's "Acknowledge
+    selected" — one request and one transaction instead of one per issue,
+    which a full snapshot (hundreds of issues) would otherwise fan out past
+    the general API rate limit. All-or-nothing: every id is validated before
+    any is stamped, so a bad id or a BLOCK issue rejects the whole batch."""
+    await _get_owned_snapshot(db, snapshot_id, current.org_id)
+    issue_ids = list(dict.fromkeys(body.issue_ids))
+    issues = await validation_issues_repo.list_by_ids(db, issue_ids)
+    if len(issues) != len(issue_ids):
+        raise NotFound("Issue")
+    lines = {line.id: line for line in await order_lines_repo.list_by_ids(db, list({i.order_line_id for i in issues}))}
+    for issue in issues:
+        line = lines.get(issue.order_line_id)
+        if line is None or line.snapshot_id != snapshot_id:
+            raise NotFound("Issue")
+        _reject_block(issue)
+
+    for issue in issues:
+        await _acknowledge(db, issue, lines[issue.order_line_id], current=current, snapshot_id=snapshot_id)
+    await db.commit()
+    return [IssueResponse.model_validate(i) for i in issues]
+
+
+@router.post("/{snapshot_id}/issues/{issue_id}/acknowledge", response_model=IssueResponse)
+async def acknowledge_issue(
+    snapshot_id: uuid.UUID,
+    issue_id: uuid.UUID,
+    current: CurrentUser = Depends(_trading_console),
+    db: AsyncSession = Depends(get_db),
+) -> IssueResponse:
+    """§5.7's publication gate, the other half of it: a WARN/CORRECTION
+    issue on an active line must be explicitly acknowledged, with the
+    acknowledger's id and a timestamp, before a publication can proceed
+    (services/publication_service.py enforces this). Deferred from Phase 2
+    by design — tied to publication, which didn't exist yet (§18)."""
+    await _get_owned_snapshot(db, snapshot_id, current.org_id)
+    issue = await validation_issues_repo.get_by_id(db, issue_id)
+    if issue is None:
+        raise NotFound("Issue")
+    order_line = await order_lines_repo.get_by_id(db, issue.order_line_id)
+    if order_line is None or order_line.snapshot_id != snapshot_id:
+        raise NotFound("Issue")
+    _reject_block(issue)
+
+    await _acknowledge(db, issue, order_line, current=current, snapshot_id=snapshot_id)
     await db.commit()
     return IssueResponse.model_validate(issue)
+

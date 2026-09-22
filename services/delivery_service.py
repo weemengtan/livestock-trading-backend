@@ -44,9 +44,10 @@ async def buyer_safe_payload(db: AsyncSession, publication: DnbpPublication, lin
     separately, so the buyer and the Trading Console's
     GET /publications/current/progress can never see numbers that drift
     apart (both call compute_species_progress)."""
-    progress_by_species = {
-        p.species: p for p in await buying_progress_service.compute_species_progress(db, publication.org_id, publication, lines)
-    }
+    species_progress = await buying_progress_service.compute_species_progress(
+        db, publication.org_id, publication, lines
+    )
+    progress_by_species = {p.species: p for p in species_progress}
     return {
         "publication_id": str(publication.id),
         "published_at": publication.published_at.isoformat(),

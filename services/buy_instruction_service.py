@@ -28,6 +28,7 @@ from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.business_time import business_today
 from core.errors import (
     FillsNotAllowed,
     InstructionNotApproved,
@@ -65,7 +66,7 @@ async def generate(
     # of documented interpretive choice Phase 3b made for the impact-preview
     # formula — this defaults to the snapshot's own `as_of_date` (the date
     # the abattoir's submission covers) unless the caller overrides it.
-    effective_trade_date = trade_date or snapshot.as_of_date or date.today()
+    effective_trade_date = trade_date or snapshot.as_of_date or business_today()
 
     existing_for_date = await buy_instructions_repo.list_for_org(db, snapshot.org_id, trade_date=effective_trade_date)
     version = len(existing_for_date) + 1

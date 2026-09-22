@@ -23,11 +23,12 @@ Run with: uv run python -m scripts.seed_market_intel
 import asyncio
 import random
 import uuid
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
 
 from sqlalchemy import delete
 
+from core.business_time import business_today
 from core.db import async_session_factory
 from core.reference_data import get_operational_constants, get_saleyard_calendar, resolve_saleyard_for_date
 from models.enums import BuyEntrySyncStatus, OrgKind
@@ -92,7 +93,7 @@ def _build_rows(
     rng = random.Random(RANDOM_SEED)
 
     rows: list[MarketObservation] = []
-    today = date.today()
+    today = business_today()
     d = today - timedelta(weeks=WEEKS_OF_HISTORY)
     while d <= today:
         entry = resolve_saleyard_for_date(d, calendar)

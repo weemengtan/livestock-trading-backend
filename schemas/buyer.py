@@ -15,6 +15,16 @@ from decimal import Decimal
 from pydantic import BaseModel
 
 
+class SaleyardOption(BaseModel):
+    """One weekday -> saleyard row of the saleyard calendar (§6.8), trimmed to
+    what a buyer needs to default and suggest a saleyard. Deliberately none
+    of SaleyardCalendarEntry's prepayment_aud/note — trading-console
+    business data that isn't buyer-facing."""
+
+    saleyard: str
+    day: str
+
+
 class SpeciesOption(BaseModel):
     """The open species_registry (models/reference_data.py::SpeciesRegistry),
     trimmed to what a buyer needs to populate a picker — deliberately none
@@ -63,8 +73,11 @@ class PushSubscriptionRequest(BaseModel):
 
 
 class BuyEntryCreateRequest(BaseModel):
+    """No `trade_date`: the server derives it from `client_created_at`
+    (core/business_time.capture_date) — a buyer can only log against the day
+    the entry was captured. A `trade_date` sent by an older client is ignored."""
+
     saleyard: str
-    trade_date: date
     species: str
     agent: str | None = None
     pen: str | None = None

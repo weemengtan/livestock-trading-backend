@@ -16,6 +16,13 @@ async def get_by_id(db: AsyncSession, order_line_id: uuid.UUID) -> OrderLine | N
     return await db.get(OrderLine, order_line_id)
 
 
+async def list_by_ids(db: AsyncSession, order_line_ids: list[uuid.UUID]) -> list[OrderLine]:
+    if not order_line_ids:
+        return []
+    result = await db.execute(select(OrderLine).where(OrderLine.id.in_(order_line_ids)))
+    return list(result.scalars().all())
+
+
 async def list_by_snapshot(
     db: AsyncSession, snapshot_id: uuid.UUID, *, species: str | None = None
 ) -> list[OrderLine]:

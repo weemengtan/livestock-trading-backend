@@ -8,11 +8,12 @@ retroactively change whether a past buy was a breach (§12.4).
 
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.business_time import capture_date
 from core.errors import Conflict, NotFound
 from core.reference_data import get_operational_constants
 from domain.buyer.bidcheck import score_bid
@@ -24,7 +25,6 @@ from repositories import publications as publications_repo
 @dataclass(slots=True)
 class BuyEntryInput:
     saleyard: str
-    trade_date: date
     species: str
     agent: str | None
     pen: str | None
@@ -84,7 +84,7 @@ async def create_or_sync_entry(
     entry = BuyEntry(
         buyer_id=buyer_id,
         saleyard=payload.saleyard,
-        trade_date=payload.trade_date,
+        trade_date=capture_date(payload.client_created_at),
         species=payload.species,
         agent=payload.agent,
         pen=payload.pen,

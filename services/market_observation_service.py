@@ -8,11 +8,12 @@ against our own Do Not Buy Price — so this only derives
 
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.business_time import capture_date
 from models.market_observation import MarketObservation
 from repositories import market_observations as market_observations_repo
 
@@ -20,7 +21,6 @@ from repositories import market_observations as market_observations_repo
 @dataclass(slots=True)
 class MarketObservationInput:
     saleyard: str
-    trade_date: date
     species: str
     competitor_name: str
     agent: str | None
@@ -67,7 +67,7 @@ async def create_or_sync_observation(
         org_id=org_id,
         observer_id=observer_id,
         saleyard=payload.saleyard,
-        trade_date=payload.trade_date,
+        trade_date=capture_date(payload.client_created_at),
         species=payload.species,
         competitor_name=payload.competitor_name,
         agent=payload.agent,

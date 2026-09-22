@@ -176,7 +176,9 @@ async def publish(
 
     # Same ordering as the old direct /publications route, for the same
     # reason: fan-out only after the publish itself is durably committed.
-    await delivery_service.fan_out(db, redis, publication=publication, lines=lines, buyer_notified=publication.buyer_notified)
+    await delivery_service.fan_out(
+        db, redis, publication=publication, lines=lines, buyer_notified=publication.buyer_notified
+    )
     await db.commit()
     return await _to_response(db, instruction)
 
