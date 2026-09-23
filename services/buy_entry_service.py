@@ -37,6 +37,8 @@ class BuyEntryInput:
     freight_per_head: Decimal | None
     other_cost_per_kg: Decimal | None
     breach_reason: str | None
+    is_outsourced: bool
+    outsourced_buyer_name: str | None
     client_uuid: uuid.UUID
     client_created_at: datetime
 
@@ -136,6 +138,8 @@ async def create_or_sync_entry(
         variance_per_kg=result.variance_per_kg,
         is_breach=result.is_breach,
         breach_reason=payload.breach_reason,
+        is_outsourced=payload.is_outsourced,
+        outsourced_buyer_name=payload.outsourced_buyer_name,
         client_uuid=payload.client_uuid,
         client_created_at=payload.client_created_at,
     )

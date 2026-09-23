@@ -57,6 +57,14 @@ class BuyEntry(TimestampedBase):
     is_breach: Mapped[bool] = mapped_column(Boolean)
     breach_reason: Mapped[str | None] = mapped_column(String, default=None)
 
+    # Outsourced Buy Log: the auction-buyer's own saleyard couldn't fulfil a
+    # species' DNBP, so a 3rd-party buyer purchased on their behalf at a
+    # different saleyard. Scored, deduplicated and counted toward
+    # heads_bought/target fulfillment exactly like any other entry — this
+    # flag is a reporting/traceability label, not a different code path.
+    is_outsourced: Mapped[bool] = mapped_column(Boolean, default=False)
+    outsourced_buyer_name: Mapped[str | None] = mapped_column(String, default=None)
+
     # Offline sync (§12.7) — idempotency key generated client-side.
     client_uuid: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), unique=True, index=True)
     client_created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

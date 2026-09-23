@@ -53,6 +53,8 @@ _ENTRY_AUDIT_FIELDS = (
     "variance_per_kg",
     "is_breach",
     "is_deleted",
+    "is_outsourced",
+    "outsourced_buyer_name",
 )
 
 router = APIRouter(prefix="/buyer", tags=["buyer"])
@@ -74,6 +76,8 @@ def _to_input(body: BuyEntryCreateRequest) -> BuyEntryInput:
         freight_per_head=body.freight_per_head,
         other_cost_per_kg=body.other_cost_per_kg,
         breach_reason=body.breach_reason,
+        is_outsourced=body.is_outsourced,
+        outsourced_buyer_name=body.outsourced_buyer_name,
         client_uuid=body.client_uuid,
         client_created_at=body.client_created_at,
     )
@@ -99,6 +103,8 @@ def _to_entry_response(entry, *, is_possible_duplicate: bool = False) -> BuyEntr
         variance_per_kg=entry.variance_per_kg,
         is_breach=entry.is_breach,
         breach_reason=entry.breach_reason,
+        is_outsourced=entry.is_outsourced,
+        outsourced_buyer_name=entry.outsourced_buyer_name,
         client_uuid=entry.client_uuid,
         client_created_at=entry.client_created_at,
         synced_at=entry.synced_at,
@@ -224,7 +230,7 @@ async def patch_entry(
         raise NotFound("Buy entry")
 
     before_state = audit_service.state_of(entry, _ENTRY_AUDIT_FIELDS)
-    for field in ("pen", "description", "breach_reason", "head_count"):
+    for field in ("pen", "description", "breach_reason", "head_count", "is_outsourced", "outsourced_buyer_name"):
         value = getattr(body, field)
         if value is not None:
             setattr(entry, field, value)

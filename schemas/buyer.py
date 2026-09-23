@@ -113,6 +113,8 @@ class BuyEntryCreateRequest(BaseModel):
     freight_per_head: Decimal | None = None
     other_cost_per_kg: Decimal | None = None
     breach_reason: str | None = None
+    is_outsourced: bool = False
+    outsourced_buyer_name: str | None = None
     client_uuid: uuid.UUID
     client_created_at: datetime
 
@@ -128,6 +130,8 @@ class BuyEntryPatchRequest(BaseModel):
     head_count: int | None = None
     price_per_head: Decimal | None = None
     weight_kg: Decimal | None = None
+    is_outsourced: bool | None = None
+    outsourced_buyer_name: str | None = None
 
 
 class BuyEntryResponse(BaseModel):
@@ -149,6 +153,8 @@ class BuyEntryResponse(BaseModel):
     variance_per_kg: Decimal
     is_breach: bool
     breach_reason: str | None
+    is_outsourced: bool
+    outsourced_buyer_name: str | None
     client_uuid: uuid.UUID
     client_created_at: datetime
     synced_at: datetime | None
