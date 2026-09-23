@@ -205,7 +205,14 @@ async def add_fill(
     instruction = await _get_owned(db, instruction_id, current.org_id)
     line = await _get_owned_line(db, instruction, line_id)
     await buy_instruction_service.add_fill(
-        db, instruction, line, label=body.label, kg_amount=body.kg_amount, actor_id=current.user_id
+        db,
+        instruction,
+        line,
+        label=body.label,
+        kg_amount=body.kg_amount,
+        actor_id=current.user_id,
+        is_outsourced=body.is_outsourced,
+        outsourced_buyer_name=body.outsourced_buyer_name,
     )
     await db.commit()
     return await _to_response(db, instruction)
@@ -241,7 +248,13 @@ async def get_reconciliation(
         week_end=week_end,
         by_saleyard=[
             SaleyardReconciliationResponse(
-                saleyard=r.saleyard, species=r.species, schw_kg=r.schw_kg, heads=r.heads, actual_cost=r.actual_cost
+                saleyard=r.saleyard,
+                species=r.species,
+                schw_kg=r.schw_kg,
+                heads=r.heads,
+                actual_cost=r.actual_cost,
+                outsourced_heads=r.outsourced_heads,
+                outsourced_cost=r.outsourced_cost,
             )
             for r in rows
         ],
@@ -254,6 +267,8 @@ async def get_reconciliation(
             expected_cost=summary.expected_cost,
             actual_cost=summary.actual_cost,
             cost_variance=summary.cost_variance,
+            outsourced_heads=summary.outsourced_heads,
+            outsourced_cost=summary.outsourced_cost,
         ),
     )
 
@@ -283,6 +298,8 @@ async def get_reconciliation_entries(
             implied_price_per_kg=e.implied_price_per_kg,
             is_breach=e.is_breach,
             breach_reason=e.breach_reason,
+            is_outsourced=e.is_outsourced,
+            outsourced_buyer_name=e.outsourced_buyer_name,
             client_created_at=e.client_created_at,
         )
         for e in entries

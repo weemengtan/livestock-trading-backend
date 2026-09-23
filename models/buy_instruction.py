@@ -2,7 +2,7 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Date, DateTime, Enum, ForeignKey, Integer, Numeric, String
+from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, Integer, Numeric, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -81,7 +81,15 @@ class BuyInstructionLineFill(TimestampedBase):
     unbounded list of manual fills Bing enters per line while the
     instruction is ISSUED or ACKNOWLEDGED — never while DRAFT (nothing to
     reconcile yet) or RECONCILED (closed). `Balance` is always derived
-    (`schw_kg - sum(fills)`), never stored here."""
+    (`schw_kg - sum(fills)`), never stored here.
+
+    `is_outsourced`/`outsourced_buyer_name` mirror `BuyEntry`'s own fields of
+    the same name (models/buy_entry.py) for the same reason they exist
+    there — a 3rd-party buyer purchased this portion on the org's behalf —
+    but can't simply be read off a `buy_entries` row: this table has no
+    reference to one (see the module docstring above). So, like `label`/
+    `kg_amount` themselves, it is a manual attribution Bing makes per fill
+    at entry time, not a derived value."""
 
     __tablename__ = "buy_instruction_line_fills"
 
@@ -92,3 +100,5 @@ class BuyInstructionLineFill(TimestampedBase):
     kg_amount: Mapped[Decimal] = mapped_column(MONEY)
     entered_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
     entered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    is_outsourced: Mapped[bool] = mapped_column(Boolean, default=False)
+    outsourced_buyer_name: Mapped[str | None] = mapped_column(String, default=None)

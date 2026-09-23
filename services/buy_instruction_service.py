@@ -235,13 +235,21 @@ async def add_fill(
     label: str,
     kg_amount: Decimal,
     actor_id: uuid.UUID,
+    is_outsourced: bool = False,
+    outsourced_buyer_name: str | None = None,
 ) -> BuyInstructionLineFill:
     if line.instruction_id != instruction.id:
         raise NotFound("Buy instruction line")
     if instruction.status not in (BuyInstructionStatus.ISSUED, BuyInstructionStatus.ACKNOWLEDGED):
         raise FillsNotAllowed()
     fill = BuyInstructionLineFill(
-        line_id=line.id, label=label, kg_amount=kg_amount, entered_by=actor_id, entered_at=datetime.now(UTC)
+        line_id=line.id,
+        label=label,
+        kg_amount=kg_amount,
+        entered_by=actor_id,
+        entered_at=datetime.now(UTC),
+        is_outsourced=is_outsourced,
+        outsourced_buyer_name=outsourced_buyer_name if is_outsourced else None,
     )
     await buy_instructions_repo.add_fill(db, fill)
     await audit_service.write(
@@ -250,7 +258,12 @@ async def add_fill(
         action="buy_instruction.fill_added",
         entity="buy_instruction_line",
         entity_id=line.id,
-        after={"label": label, "kg_amount": str(kg_amount)},
+        after={
+            "label": label,
+            "kg_amount": str(kg_amount),
+            "is_outsourced": is_outsourced,
+            "outsourced_buyer_name": outsourced_buyer_name if is_outsourced else None,
+        },
     )
     return fill
 
@@ -288,6 +301,8 @@ class SaleyardReconciliation:
     schw_kg: Decimal
     heads: int
     actual_cost: Decimal
+    outsourced_heads: int
+    outsourced_cost: Decimal
 
 
 @dataclass(slots=True)
@@ -300,6 +315,8 @@ class ReconciliationSummary:
     expected_cost: Decimal  # C
     actual_cost: Decimal  # D
     cost_variance: Decimal  # C - D
+    outsourced_heads: int
+    outsourced_cost: Decimal  # subset of D bought via a 3rd-party buyer — see SaleyardReconciliation docstring
 
 
 async def compute_reconciliation(
@@ -315,7 +332,16 @@ async def compute_reconciliation(
     "Actual Cost" is the livestock cost only (price_per_head x head_count),
     the same basis as the received `V` (`total_livestock_cost = L x F`, also
     excluding freight) — freight is tracked separately per entry, not folded
-    into this figure."""
+    into this figure.
+
+    `outsourced_heads`/`outsourced_cost` are the subset of that same row's
+    heads/actual_cost that came from buy_entries flagged `is_outsourced`
+    (§8's Outsourced Buy Log) — never a separate row, since an outsourced
+    buy is still counted toward this saleyard+species pair's fulfilment
+    exactly like any other entry (models/buy_entry.py's `is_outsourced`
+    docstring). Surfaced so a 3rd-party buyer's commission cost — not
+    tracked here, but computed downstream from these heads/kg — can be
+    apportioned without re-querying buy_entries directly."""
     lines = await buy_instructions_repo.list_lines(db, instruction.id)
     week_start, week_end = trading_week_bounds(instruction.trade_date)
     entries = await buy_instructions_repo.list_org_buy_entries_in_window(
@@ -333,6 +359,8 @@ async def compute_reconciliation(
             schw_kg=schw_kg_for_entries(es),
             heads=sum(e.head_count for e in es),
             actual_cost=sum((e.price_per_head * e.head_count for e in es), MONEY_ZERO),
+            outsourced_heads=sum(e.head_count for e in es if e.is_outsourced),
+            outsourced_cost=sum((e.price_per_head * e.head_count for e in es if e.is_outsourced), MONEY_ZERO),
         )
         for (saleyard, species), es in sorted(by_saleyard_species.items())
     ]
@@ -343,6 +371,8 @@ async def compute_reconciliation(
     bought_schw = sum((row.schw_kg for row in saleyard_rows), MONEY_ZERO)
     actual_heads = sum(row.heads for row in saleyard_rows)
     actual_cost = sum((row.actual_cost for row in saleyard_rows), MONEY_ZERO)
+    outsourced_heads = sum(row.outsourced_heads for row in saleyard_rows)
+    outsourced_cost = sum((row.outsourced_cost for row in saleyard_rows), MONEY_ZERO)
 
     summary = ReconciliationSummary(
         actual_heads=actual_heads,
@@ -353,6 +383,8 @@ async def compute_reconciliation(
         expected_cost=expected_cost,
         actual_cost=actual_cost,
         cost_variance=expected_cost - actual_cost,
+        outsourced_heads=outsourced_heads,
+        outsourced_cost=outsourced_cost,
     )
     return saleyard_rows, summary
 
@@ -370,6 +402,8 @@ class ReconciliationEntry:
     implied_price_per_kg: Decimal
     is_breach: bool
     breach_reason: str | None
+    is_outsourced: bool
+    outsourced_buyer_name: str | None
     client_created_at: datetime
 
 
@@ -402,6 +436,8 @@ async def list_reconciliation_entries(
             implied_price_per_kg=e.implied_price_per_kg,
             is_breach=e.is_breach,
             breach_reason=e.breach_reason,
+            is_outsourced=e.is_outsourced,
+            outsourced_buyer_name=e.outsourced_buyer_name,
             client_created_at=e.client_created_at,
         )
         for e in entries

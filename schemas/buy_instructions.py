@@ -18,6 +18,8 @@ class PatchBuyInstructionRequest(BaseModel):
 class AddFillRequest(BaseModel):
     label: str
     kg_amount: Decimal
+    is_outsourced: bool = False
+    outsourced_buyer_name: str | None = None
 
 
 class FillResponse(BaseModel):
@@ -26,6 +28,8 @@ class FillResponse(BaseModel):
     kg_amount: Decimal
     entered_by: uuid.UUID
     entered_at: datetime
+    is_outsourced: bool
+    outsourced_buyer_name: str | None
 
     model_config = {"from_attributes": True}
 
@@ -70,6 +74,8 @@ class SaleyardReconciliationResponse(BaseModel):
     schw_kg: Decimal
     heads: int
     actual_cost: Decimal
+    outsourced_heads: int
+    outsourced_cost: Decimal
 
 
 class ReconciliationSummaryResponse(BaseModel):
@@ -81,6 +87,8 @@ class ReconciliationSummaryResponse(BaseModel):
     expected_cost: Decimal
     actual_cost: Decimal
     cost_variance: Decimal
+    outsourced_heads: int
+    outsourced_cost: Decimal
 
 
 class ReconciliationResponse(BaseModel):
@@ -102,4 +110,6 @@ class ReconciliationEntryResponse(BaseModel):
     implied_price_per_kg: Decimal
     is_breach: bool
     breach_reason: str | None
+    is_outsourced: bool
+    outsourced_buyer_name: str | None
     client_created_at: datetime
