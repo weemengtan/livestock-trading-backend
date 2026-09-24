@@ -1,12 +1,14 @@
 """Loads the active reference configuration (§6) — always from Postgres.
 
-Everything here comes from the currently-active `reference_data_versions`
-row and its `reference_data_entries`: the DNBP parameters (§6.4, §6.5,
-§6.7 cif buffer), the operational tunables (§6.7) and the saleyard calendar
-(§6.8). Versioned, effective-dated, audited, editable through the Reference
-Data screen (§11.7). No caching and no file reads: activating a new version
-takes effect on the very next request, and every process sees the same
-values.
+Two independently versioned halves:
+  * the DNBP model (§6.4, §6.5, §6.7 cif buffer): whichever `dnbp_models` row
+    is live right now — approved, with the latest activation instant that has
+    passed (schedulable ahead of time, see domain/engine/model_schedule.py);
+  * the operational tunables (§6.7) and saleyard calendar (§6.8): the
+    currently-active `reference_data_versions` row and its entries.
+Versioned, audited, editable through the Reference Data screen (§11.7). No
+caching and no file reads: a change takes effect on the very next request,
+and every process sees the same values.
 
 The first reference-data version of a new database is created by an operator
 (scripts/seed_reference_data.py --file <your bootstrap JSON>, or the Reference
@@ -15,14 +17,17 @@ Data screen); nothing at runtime reads any file.
 
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.errors import NoActiveReferenceDataError, ReferenceDataIncomplete
 from domain.engine.config import EverhealthConfig
+from domain.engine.model_schedule import live_model_id
 from models.enums import ReferenceDataTableKey
 from models.reference_data import ReferenceDataEntry, ReferenceDataVersion
+from repositories import dnbp_models as dnbp_models_repo
 from repositories import reference_data as reference_data_repo
 
 WEEKDAYS = ("MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY")
@@ -75,36 +80,44 @@ def _scalar(entries: list[ReferenceDataEntry], key: ReferenceDataTableKey) -> De
     raise ReferenceDataIncomplete(key.value)
 
 
-async def get_active_version_id(db: AsyncSession) -> uuid.UUID:
-    version = await reference_data_repo.get_active_version(db)
-    if version is None:
+async def get_live_model_id(db: AsyncSession, at: datetime | None = None) -> uuid.UUID:
+    """The DNBP model live at `at` (default: now). Resolved from the
+    approved schedule and the clock — see domain/engine/model_schedule.py."""
+    models = await dnbp_models_repo.list_models(db)
+    live_id = live_model_id([dnbp_models_repo.to_scheduled(m) for m in models], at or datetime.now(UTC))
+    if live_id is None:
         raise NoActiveReferenceDataError()
-    return version.id
+    return live_id
 
 
-async def get_active_everhealth_config(db: AsyncSession) -> EverhealthConfig:
-    version, entries = await _load_active(db)
+async def get_active_everhealth_config(db: AsyncSession, at: datetime | None = None) -> EverhealthConfig:
+    """The engine config of the DNBP model live at `at` (default: now).
 
-    dnbp_factor_by_species: dict[str, Decimal] = {}
-    standard_weight_by_species: dict[str, Decimal] = {}
-    for entry in entries:
-        if entry.table_key == ReferenceDataTableKey.DNBP_FACTOR:
-            dnbp_factor_by_species[entry.key1] = entry.value
-        elif entry.table_key == ReferenceDataTableKey.STANDARD_WEIGHT:
-            standard_weight_by_species[entry.key1] = entry.value
+    Never cached: a scheduled model takes effect on the first request after
+    its activation instant, on every process, with no job to run. The
+    config's `ref_data_version` label is the model's name and `version_id` its
+    id, so every computed workings row names the exact model that produced it.
+    """
+    model_id = await get_live_model_id(db, at)
+    return await get_model_config(db, model_id)
 
-    try:
-        cif_buffer_per_kg = _scalar(entries, ReferenceDataTableKey.CIF_BUFFER_PER_KG)
-    except ReferenceDataIncomplete as exc:
-        raise NoActiveReferenceDataError() from exc
 
+async def get_model_config(db: AsyncSession, model_id: uuid.UUID) -> EverhealthConfig:
+    """The engine config for one specific model, live or not (used by the
+    impact preview, which prices a model that has not gone live yet)."""
+    model = await dnbp_models_repo.get_by_id(db, model_id)
+    if model is None:
+        raise NoActiveReferenceDataError()
+    species_rows = (await dnbp_models_repo.species_for(db, [model.id]))[model.id]
     return EverhealthConfig(
-        cif_buffer_per_kg=cif_buffer_per_kg,
-        dnbp_factor_by_species=dnbp_factor_by_species,
-        standard_weight_by_species=standard_weight_by_species,
-        ref_data_version=version.effective_from.date().isoformat(),
-        version_id=str(version.id),
-        model_type=version.model_type,
+        cif_buffer_per_kg=model.cif_buffer_per_kg,
+        dnbp_factor_by_species={r.species: r.dnbp_factor for r in species_rows if r.dnbp_factor is not None},
+        standard_weight_by_species={
+            r.species: r.standard_weight for r in species_rows if r.standard_weight is not None
+        },
+        ref_data_version=model.name,
+        version_id=str(model.id),
+        model_type=model.model_type,
     )
 
 

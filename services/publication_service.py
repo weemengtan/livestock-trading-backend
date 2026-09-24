@@ -41,7 +41,7 @@ from models.order_snapshot import OrderSnapshot
 from repositories import order_workings as order_workings_repo
 from repositories import publications as publications_repo
 from repositories import validation_issues as validation_issues_repo
-from services import audit_service
+from services import audit_service, dnbp_model_service
 from services.calculate_service import ENGINE_VERSION
 
 
@@ -141,6 +141,10 @@ async def publish(
     db: AsyncSession, snapshot: OrderSnapshot, *, actor_id: uuid.UUID, notes: str | None
 ) -> tuple[DnbpPublication, list[DnbpPublicationLine]]:
     await _assert_publishable(db, snapshot.id)
+    # The published prices come from the stored workings, but weight bands and
+    # buy-entry checks read the live model — publishing across a model switch
+    # would mix the two. Recalculate first.
+    await dnbp_model_service.assert_not_stale(db, snapshot.id)
 
     drafts = await compute_publication_lines(db, snapshot.id)
     if not drafts:

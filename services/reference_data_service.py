@@ -15,12 +15,9 @@ from core.config import settings
 from core.errors import AbattoirOwnedTable, AppError, FourEyesRequired, ImpactPreviewRequired, NotFound
 from core.reference_data import WEEKDAYS, get_active_everhealth_config
 from domain.engine.config import DEFAULT_MODEL_TYPE, EverhealthConfig
-from domain.engine.dnbp import available_model_types
-from domain.engine.impact import ImpactLineInput, ImpactPreview, compute_impact
+from domain.engine.impact import ImpactPreview
 from models.enums import ReferenceDataTableKey
 from models.reference_data import ReferenceDataVersion
-from repositories import order_lines as order_lines_repo
-from repositories import order_snapshots as order_snapshots_repo
 from repositories import reference_data as reference_data_repo
 from services import audit_service
 
@@ -59,21 +56,22 @@ _WRITABLE_TABLE_KEYS = {
     "benchmark_compare_highlight_threshold_pct": ReferenceDataTableKey.BENCHMARK_COMPARE_HIGHLIGHT_THRESHOLD_PCT,
 }
 
-# Only these two can move `AC` — the impact-preview/second-confirmation
-# friction (§6.5) applies to them and them only. Standard weight (§6.4) is
-# Everhealth-owned and versioned but cannot reach AC (§5.3), so it is
-# exempt from that gate.
-SOURCE_OF_TRUTH_TABLE_KEYS = {ReferenceDataTableKey.CIF_BUFFER_PER_KG, ReferenceDataTableKey.DNBP_FACTOR}
-
-
-# Keyed tables where dropping one row is meaningful (a species no longer
-# priced, a saleyard no longer traded). Single values (CIF buffer, the
-# operational constants) are required and can only be changed.
-REMOVABLE_TABLE_KEYS = {
+# The pricing parameters moved out of reference-data versions into DNBP
+# models (services/dnbp_model_service.py), which can be scheduled ahead of
+# time. A version here now carries only the operational tunables and the
+# saleyard calendar, so a model scheduled for next month can never roll one
+# of those back.
+DNBP_MODEL_TABLE_KEYS = {
+    ReferenceDataTableKey.CIF_BUFFER_PER_KG,
     ReferenceDataTableKey.DNBP_FACTOR,
     ReferenceDataTableKey.STANDARD_WEIGHT,
-    ReferenceDataTableKey.SALEYARD_CALENDAR,
 }
+
+
+# Keyed tables where dropping one row is meaningful (a saleyard no longer
+# traded). Single values (the operational constants) are required and can
+# only be changed.
+REMOVABLE_TABLE_KEYS = {ReferenceDataTableKey.SALEYARD_CALENDAR}
 
 
 def resolve_table_key(raw_table_key: str) -> ReferenceDataTableKey:
@@ -82,6 +80,13 @@ def resolve_table_key(raw_table_key: str) -> ReferenceDataTableKey:
     resolved = _WRITABLE_TABLE_KEYS.get(raw_table_key)
     if resolved is None:
         raise AppError("UNKNOWN_TABLE_KEY", f"'{raw_table_key}' is not a recognised reference-data table.", 422)
+    if resolved in DNBP_MODEL_TABLE_KEYS:
+        raise AppError(
+            "MANAGED_BY_DNBP_MODELS",
+            f"'{raw_table_key}' is now part of a DNBP model — create or schedule a model under DNBP Models "
+            "instead of editing it here.",
+            422,
+        )
     return resolved
 
 
@@ -171,17 +176,18 @@ async def create_version(
     active version is untouched."""
     merged: dict[tuple[ReferenceDataTableKey, str | None, str | None], tuple[Decimal, str | None]] = {}
 
-    active_version = await reference_data_repo.get_active_version(db)
-    resolved_model_type = model_type or (active_version.model_type if active_version else DEFAULT_MODEL_TYPE)
-    if resolved_model_type not in available_model_types():
+    if model_type is not None:
         raise AppError(
-            "UNKNOWN_MODEL_TYPE",
-            f"'{resolved_model_type}' is not an implemented DNBP model. "
-            f"Available: {', '.join(available_model_types())}.",
+            "MANAGED_BY_DNBP_MODELS",
+            "The DNBP formula is now chosen per DNBP model — create or schedule a model instead.",
             422,
         )
+
+    active_version = await reference_data_repo.get_active_version(db)
     if active_version is not None:
         for entry in await reference_data_repo.list_entries(db, active_version.id):
+            if entry.table_key in DNBP_MODEL_TABLE_KEYS:
+                continue  # pricing parameters live in dnbp_models now; never carried into a new settings version
             merged[(entry.table_key, entry.key1, entry.key2)] = (entry.value, entry.text_value)
 
     for raw_table_key, key1, key2, value, text_value in raw_entries:
@@ -215,7 +221,7 @@ async def create_version(
         effective_from=effective_from,
         created_by=actor_id,
         note=note,
-        model_type=resolved_model_type,
+        model_type=active_version.model_type if active_version else DEFAULT_MODEL_TYPE,
         entries=resolved_entries,
     )
 
@@ -226,7 +232,6 @@ async def create_version(
         entity="reference_data_version",
         entity_id=version.id,
         after={"effective_from": effective_from.isoformat(), "note": note,
-            "model_type": resolved_model_type,
             "entry_count": len(resolved_entries),
             "removed": [{"table_key": t.value, "key1": k1, "key2": k2} for t, k1, k2 in removed],
         },
@@ -237,47 +242,14 @@ async def create_version(
 async def preview_impact(
     db: AsyncSession, version_id: uuid.UUID, *, org_id: uuid.UUID, actor_id: uuid.UUID
 ) -> ImpactPreview:
-    version, entries = await get_version_with_entries(db, version_id)
-
-    # create_version already persisted a COMPLETE snapshot (cloned from the
-    # active config with the caller's changes overlaid), so this version's
-    # own entries are the whole new_config — no further merging needed here.
-    cif_buffer: Decimal | None = None
-    factors: dict[str, Decimal] = {}
-    weights: dict[str, Decimal] = {}
-    for entry in entries:
-        if entry.table_key == ReferenceDataTableKey.CIF_BUFFER_PER_KG:
-            cif_buffer = entry.value
-        elif entry.table_key == ReferenceDataTableKey.DNBP_FACTOR:
-            factors[entry.key1] = entry.value
-        elif entry.table_key == ReferenceDataTableKey.STANDARD_WEIGHT:
-            weights[entry.key1] = entry.value
-
-    old_config = await get_active_everhealth_config(db)
-    new_config = EverhealthConfig(
-        cif_buffer_per_kg=cif_buffer if cif_buffer is not None else old_config.cif_buffer_per_kg,
-        dnbp_factor_by_species=factors,
-        standard_weight_by_species=weights,
-        model_type=version.model_type,
-    )
-
-    latest_snapshot = await order_snapshots_repo.get_latest_for_org(db, org_id)
-    lines: list[ImpactLineInput] = []
-    if latest_snapshot is not None:
-        active_lines = await order_lines_repo.list_by_snapshot(db, latest_snapshot.id)
-        lines = [
-            ImpactLineInput(
-                order_line_id=str(line.id),
-                contract_no=line.contract_no,
-                species=line.species,
-                avg_price_aud=line.avg_price_aud,
-                qty_kg=line.qty_kg,
-            )
-            for line in active_lines
-            if line.species is not None
-        ]
-
-    preview = compute_impact(lines, old_config=old_config, new_config=new_config)
+    """A reference-data version now holds only operational tunables and the
+    saleyard calendar (§6.7, §6.8) — none of which can move `AC` — so there
+    is no price impact to list. The step is kept so the propose -> preview ->
+    activate flow and its audit trail are unchanged; the price-moving
+    parameters get their real before/after preview on DNBP models
+    (services/dnbp_model_service.preview_impact)."""
+    version, _entries = await get_version_with_entries(db, version_id)
+    preview = ImpactPreview(lines=[], aggregate_exposure_delta_aud=Decimal(0), lines_affected=0, lines_unpriced=0)
 
     await reference_data_repo.mark_impact_previewed(db, version)
     await audit_service.write(

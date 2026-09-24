@@ -2,6 +2,7 @@ from models.audit_log import AuditLog
 from models.buy_entry import BuyEntry
 from models.buy_instruction import BuyInstruction, BuyInstructionLine, BuyInstructionLineFill
 from models.correction_request import CorrectionRequest
+from models.dnbp_model import DnbpModel, DnbpModelSpecies
 from models.dnbp_publication import DnbpPublication, DnbpPublicationDelivery, DnbpPublicationLine
 from models.ingestion_contract import IngestionContractRecord
 from models.market_observation import MarketObservation
@@ -24,6 +25,8 @@ from models.user_role import UserRole
 from models.validation_issue import ValidationIssueRecord
 
 __all__ = [
+    "DnbpModel",
+    "DnbpModelSpecies",
     "AuditLog",
     "BuyEntry",
     "BuyInstruction",

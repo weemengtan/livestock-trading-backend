@@ -45,7 +45,7 @@ from repositories import buy_instructions as buy_instructions_repo
 from repositories import order_snapshots as order_snapshots_repo
 from repositories import order_workings as order_workings_repo
 from repositories import users as users_repo
-from services import audit_service, publication_service
+from services import audit_service, dnbp_model_service, publication_service
 
 MONEY_ZERO = Decimal("0")
 
@@ -61,6 +61,10 @@ async def generate(
     rows = await order_workings_repo.list_active_with_bing_dnbp(db, snapshot.id)
     if not rows:
         raise NothingToInstruct()
+    # An instruction built from workings computed under a superseded DNBP
+    # model would carry prices the live model no longer produces — refuse now
+    # rather than at publish time, after someone has already approved it.
+    await dnbp_model_service.assert_not_stale(db, snapshot.id)
 
     # §13.1's header shows a single trade date for the whole instruction.
     # §9.6 doesn't list an explicit `trade_date` parameter, so — same kind

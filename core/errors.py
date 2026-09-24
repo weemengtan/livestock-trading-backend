@@ -302,3 +302,88 @@ class ImplausibleEntry(AppError):
             status_code=422,
             details={"violations": violations},
         )
+
+
+class ModelFourEyesRequired(AppError):
+    """Same rule as FourEyesRequired (§6.5), worded for DNBP models: the
+    person who created a model cannot be the one who approves it."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "FOUR_EYES_REQUIRED",
+            "A DNBP model must be approved by someone other than the person who created it.",
+            status_code=403,
+        )
+
+
+class ActivationDateNotInFuture(AppError):
+    def __init__(self, earliest_date: str) -> None:
+        super().__init__(
+            "ACTIVATION_DATE_NOT_IN_FUTURE",
+            f"A model can only be scheduled for a future date (Singapore time). The earliest is {earliest_date}.",
+            status_code=422,
+        )
+
+
+class ActivationDateTaken(AppError):
+    def __init__(self, other_model_name: str) -> None:
+        super().__init__(
+            "ACTIVATION_DATE_TAKEN",
+            f"Model '{other_model_name}' is already scheduled to go live on that date. Only one model can switch "
+            "on at a given moment — pick a different date or cancel the other one.",
+            status_code=409,
+        )
+
+
+class ModelAlreadyLive(AppError):
+    """A model that has gone live (even if since replaced) has priced real
+    orders and is history — it can be neither rescheduled nor cancelled."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "MODEL_ALREADY_LIVE",
+            "This model has already gone live, so it can no longer be changed or cancelled. Create a new model "
+            "instead.",
+            status_code=409,
+        )
+
+
+class SnapshotFrozen(AppError):
+    """A superseded snapshot's price is no longer current; recalculating it
+    would only resurrect an out-of-date computation."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "SNAPSHOT_FROZEN",
+            "This snapshot has been superseded by a later publication and is frozen. Upload the order file "
+            "again to reprice it.",
+            status_code=409,
+        )
+
+
+class PublishedUnderOlderModel(AppError):
+    """Recalculating a published snapshot under the same model reproduces the
+    same numbers, so that stays allowed (review-and-republish). Under a
+    *different* live model it would overwrite the workings behind prices
+    buyers already received."""
+
+    def __init__(self, live_model_name: str, calculated_under: list[str]) -> None:
+        super().__init__(
+            "PUBLISHED_UNDER_OLDER_MODEL",
+            f"This snapshot was published under {', '.join(calculated_under)}, but DNBP model '{live_model_name}' "
+            "is now live. Recalculating would overwrite the workings behind the prices buyers already received — "
+            "upload the order file again to reprice it under the current model.",
+            status_code=409,
+            details={"live_model": live_model_name, "calculated_under": calculated_under},
+        )
+
+
+class CalculatedUnderOlderModel(AppError):
+    def __init__(self, live_model_name: str, calculated_under: list[str]) -> None:
+        super().__init__(
+            "CALCULATED_UNDER_OLDER_MODEL",
+            f"This snapshot was calculated under {', '.join(calculated_under)}, but DNBP model "
+            f"'{live_model_name}' is now live. Recalculate before publishing.",
+            status_code=409,
+            details={"live_model": live_model_name, "calculated_under": calculated_under},
+        )

@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.order_line import OrderLine
@@ -79,3 +79,18 @@ async def list_active_with_bing_dnbp(db: AsyncSession, snapshot_id: uuid.UUID) -
         )
     )
     return [(line, workings) for line, workings in result.all()]
+
+
+async def model_stamps_for_snapshot(
+    db: AsyncSession, snapshot_id: uuid.UUID
+) -> list[tuple[uuid.UUID | None, str, int]]:
+    """(model id, model name at compute time, line count) for every distinct
+    DNBP model this snapshot's workings were computed under. One row in the
+    normal case; several only when a snapshot was partly recomputed."""
+    result = await db.execute(
+        select(OrderWorkings.ref_data_version_id, OrderWorkings.ref_data_version, func.count())
+        .join(OrderLine, OrderWorkings.order_line_id == OrderLine.id)
+        .where(OrderLine.snapshot_id == snapshot_id)
+        .group_by(OrderWorkings.ref_data_version_id, OrderWorkings.ref_data_version)
+    )
+    return [(model_id, label, count) for model_id, label, count in result.all()]

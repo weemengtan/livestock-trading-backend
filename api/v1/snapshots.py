@@ -8,13 +8,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.deps import CurrentUser, redis_dep, require_role
 from core.db import get_db
-from core.errors import Conflict, NotFound
+from core.errors import Conflict, NotFound, SnapshotFrozen
 from domain.engine.issues import Severity
 from models.enums import Role, SnapshotStatus
 from repositories import order_lines as order_lines_repo
 from repositories import order_snapshots as order_snapshots_repo
 from repositories import order_workings as order_workings_repo
 from repositories import validation_issues as validation_issues_repo
+from schemas.dnbp_models import ModelStampResponse, SnapshotModelStatusResponse
 from schemas.order_lines import OrderLineResponse, OrderWorkingsResponse
 from schemas.snapshots import (
     AcknowledgeIssuesRequest,
@@ -25,7 +26,13 @@ from schemas.snapshots import (
     SnapshotResponse,
     UploadPreviewResponse,
 )
-from services import audit_service, calculate_service, ingestion_service, issue_acknowledgment_service
+from services import (
+    audit_service,
+    calculate_service,
+    dnbp_model_service,
+    ingestion_service,
+    issue_acknowledgment_service,
+)
 from services.ingestion_contract_service import get_active_contract
 
 router = APIRouter(prefix="/snapshots", tags=["snapshots"])
@@ -166,10 +173,39 @@ async def calculate(
     snapshot_id: uuid.UUID, current: CurrentUser = Depends(_trading_console), db: AsyncSession = Depends(get_db)
 ) -> CalculateResponse:
     snapshot = await _get_owned_snapshot(db, snapshot_id, current.org_id)
+    # A published snapshot's workings are the evidence behind prices buyers
+    # already received. Recalculating under the *same* model reproduces them
+    # exactly (review-and-republish, the Publish panel's own flow), but under
+    # a different live model it would overwrite that evidence — refused; the
+    # order file is uploaded again to reprice. A superseded snapshot is
+    # simply frozen.
+    if snapshot.status is SnapshotStatus.SUPERSEDED:
+        raise SnapshotFrozen()
+    if snapshot.status is SnapshotStatus.PUBLISHED:
+        await dnbp_model_service.assert_published_snapshot_on_live_model(db, snapshot.id)
     summary = await calculate_service.calculate_snapshot(db, snapshot, actor_id=current.user_id)
     snapshot.status = SnapshotStatus.CALCULATED
     await db.commit()
     return CalculateResponse(**summary)
+
+
+@router.get("/{snapshot_id}/model-status", response_model=SnapshotModelStatusResponse)
+async def model_status(
+    snapshot_id: uuid.UUID, current: CurrentUser = Depends(_trading_console), db: AsyncSession = Depends(get_db)
+) -> SnapshotModelStatusResponse:
+    """Which DNBP model this snapshot was calculated under versus the one
+    live now — drives the workbench's "recalculate before publishing" banner."""
+    await _get_owned_snapshot(db, snapshot_id, current.org_id)
+    status = await dnbp_model_service.snapshot_model_status(db, snapshot_id)
+    return SnapshotModelStatusResponse(
+        live_model_id=status.live_model_id,
+        live_model_name=status.live_model_name,
+        calculated_under=[
+            ModelStampResponse(model_id=s.model_id, name=s.name, line_count=s.line_count)
+            for s in status.calculated_under
+        ],
+        stale=status.stale,
+    )
 
 
 @router.get("/{snapshot_id}/issues", response_model=list[IssueResponse])
