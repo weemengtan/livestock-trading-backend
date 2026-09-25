@@ -77,6 +77,14 @@ The wipe keeps organisations, users, sessions, reference data and registries —
 
 Local scripts still work as before (`uv run python -m scripts...` uses `.env`); `cloud.sh` is the only thing that reads `.env.railway`.
 
+## Accounts and passwords
+
+`scripts/cloud.sh seed` creates four accounts, all with `SEED_PASSWORD` (never the public default): `admin@example.com` (**PLATFORM_ADMIN** — everything an Owner can do, and the only role that can see, create, change or reset another Platform Admin), `bobby@example.com` (OWNER), `bing@example.com` (ACCOUNTANT), `buyer@example.com` (BUYER). Re-running it only adds missing accounts; it never overwrites an existing password.
+
+- **Change your own password:** Profile page (click your email in the header) → Change password.
+- **Someone is locked out / forgot their password** (there is no email service): an Owner or Platform Admin opens **Users → Set temporary password**. The user is signed out everywhere and must choose their own password at next sign-in. Owners can reset Accountants and Buyers; only a Platform Admin can reset an Owner or another Platform Admin.
+- **Migrating an existing environment:** the release that added this includes migration `c4a9e1d7b2f8` (new role value + `users.must_change_password`); Railway's pre-deploy step runs it. Then run `scripts/cloud.sh seed` once to create `admin@example.com`.
+
 ## Gotchas
 
 - **Stale browsers after a wipe.** The buyer PWA keeps an offline queue in IndexedDB. Testers' browsers may hold entries from before the wipe and sync them afterwards. Have them clear site data (or use a fresh profile) after a reset.

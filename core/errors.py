@@ -79,6 +79,26 @@ class Forbidden(AppError):
         super().__init__("FORBIDDEN", message, status_code=403)
 
 
+class InvalidCurrentPassword(AppError):
+    """Deliberately not a 401: a wrong *password* is not an expired *session*,
+    and clients treat 401 as "refresh the token and retry"."""
+
+    def __init__(self) -> None:
+        super().__init__("INVALID_CURRENT_PASSWORD", "Current password is incorrect.", status_code=400)
+
+
+class PasswordChangeRequired(AppError):
+    """The account is on a temporary password: every route except the
+    change-password one refuses the session until it has been changed."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "PASSWORD_CHANGE_REQUIRED",
+            "You must change your temporary password before continuing.",
+            status_code=403,
+        )
+
+
 class NotFound(AppError):
     def __init__(self, entity: str) -> None:
         super().__init__("NOT_FOUND", f"{entity} not found.", status_code=404)
@@ -94,6 +114,15 @@ class LastOwnerGuard(AppError):
         super().__init__(
             "LAST_OWNER_GUARD",
             "Cannot deactivate the platform's last remaining active OWNER.",
+            status_code=409,
+        )
+
+
+class LastPlatformAdminGuard(AppError):
+    def __init__(self) -> None:
+        super().__init__(
+            "LAST_PLATFORM_ADMIN_GUARD",
+            "Cannot demote or deactivate the last remaining active PLATFORM_ADMIN.",
             status_code=409,
         )
 

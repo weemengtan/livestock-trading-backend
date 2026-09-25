@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 
 from pydantic import BaseModel, EmailStr
 
@@ -22,6 +23,8 @@ class MeResponse(BaseModel):
     role: Role
     org_id: uuid.UUID
     mfa_enrolled: bool
+    must_change_password: bool = False
+    last_login_at: datetime | None = None
 
 
 class ChangePasswordRequest(BaseModel):

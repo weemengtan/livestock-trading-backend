@@ -2,10 +2,10 @@ from fastapi import APIRouter, Cookie, Depends, Response
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.deps import CurrentUser, client_ip, get_current_user, redis_dep
+from api.deps import CurrentUser, client_ip, get_current_user, get_current_user_allow_password_change, redis_dep
 from core.config import settings
 from core.db import get_db
-from core.errors import AppError, InvalidToken, NotFound, PasswordPolicyViolation
+from core.errors import AppError, InvalidCurrentPassword, InvalidToken, NotFound, PasswordPolicyViolation
 from core.security import hash_password, password_policy_violations, verify_password
 from repositories import users as user_repo
 from schemas.auth import (
@@ -98,19 +98,27 @@ async def logout(
 
 
 @router.get("/me", response_model=MeResponse)
-async def me(current: CurrentUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> MeResponse:
+async def me(
+    current: CurrentUser = Depends(get_current_user_allow_password_change), db: AsyncSession = Depends(get_db)
+) -> MeResponse:
     user = await user_repo.get_by_id(db, current.user_id)
     if user is None:
         raise NotFound("User")
     return MeResponse(
-        id=user.id, email=user.email, role=current.role, org_id=user.org_id, mfa_enrolled=user.mfa_enrolled
+        id=user.id,
+        email=user.email,
+        role=current.role,
+        org_id=user.org_id,
+        mfa_enrolled=user.mfa_enrolled,
+        must_change_password=user.must_change_password,
+        last_login_at=user.last_login_at,
     )
 
 
 @router.post("/change-password", status_code=204)
 async def change_password(
     body: ChangePasswordRequest,
-    current: CurrentUser = Depends(get_current_user),
+    current: CurrentUser = Depends(get_current_user_allow_password_change),
     db: AsyncSession = Depends(get_db),
 ) -> None:
     user = await user_repo.get_by_id(db, current.user_id)
@@ -119,11 +127,16 @@ async def change_password(
             db, actor_id=current.user_id, action="auth.password_change_failed", entity="user", entity_id=current.user_id
         )
         await db.commit()
-        raise InvalidToken("Current password is incorrect.")
+        raise InvalidCurrentPassword()
     violations = password_policy_violations(body.new_password)
     if violations:
         raise PasswordPolicyViolation(violations)
+    if verify_password(body.new_password, user.password_hash):
+        # Matters most for a temporary password: the admin knows it, so the
+        # "new" password must be genuinely different.
+        raise PasswordPolicyViolation(["New password must be different from the current one."])
     user.password_hash = hash_password(body.new_password)
+    user.must_change_password = False
     await audit_service.write(
         db, actor_id=current.user_id, action="auth.password_changed", entity="user", entity_id=current.user_id
     )

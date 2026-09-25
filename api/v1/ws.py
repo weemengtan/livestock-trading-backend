@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from redis.asyncio import Redis
 
 from api.deps import CurrentUser, redis_dep, require_role
+from core.permissions import CONSOLE_ROLES
 from models.enums import Role
 from schemas.ws import TicketResponse
 from ws import channels
@@ -87,7 +88,7 @@ async def ws_console(websocket: WebSocket, ticket: str, redis: Redis = Depends(r
     except Exception:
         await websocket.close(code=4401)
         return
-    if payload.role not in (Role.OWNER, Role.ACCOUNTANT):
+    if payload.role not in CONSOLE_ROLES:
         await websocket.close(code=4403)
         return
     await _relay(websocket, redis, channels.console_channel(payload.org_id))

@@ -52,6 +52,22 @@ async def count_active_owners(db: AsyncSession, *, excluding_user_id: uuid.UUID 
     return result.scalar_one()
 
 
+async def count_active_platform_admins(db: AsyncSession, *, excluding_user_id: uuid.UUID | None = None) -> int:
+    """Same idea as count_active_owners: never let the last active
+    PLATFORM_ADMIN be demoted or deactivated, or nobody could ever create one
+    again short of editing the database."""
+    stmt = (
+        select(func.count())
+        .select_from(User)
+        .join(UserRole, UserRole.user_id == User.id)
+        .where(UserRole.role == Role.PLATFORM_ADMIN, User.invite_status != InviteStatus.DEACTIVATED)
+    )
+    if excluding_user_id is not None:
+        stmt = stmt.where(User.id != excluding_user_id)
+    result = await db.execute(stmt)
+    return result.scalar_one()
+
+
 async def create_pending_user(
     db: AsyncSession, *, org_id: uuid.UUID, email: str, role: Role, invited_by: uuid.UUID | None
 ) -> User:

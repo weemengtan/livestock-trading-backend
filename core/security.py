@@ -71,7 +71,7 @@ async def is_breached_password(password: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def create_access_token(*, user_id: str, role: str, org_id: str) -> str:
+def create_access_token(*, user_id: str, role: str, org_id: str, must_change_password: bool = False) -> str:
     now = datetime.now(UTC)
     payload = {
         "sub": user_id,
@@ -81,6 +81,8 @@ def create_access_token(*, user_id: str, role: str, org_id: str) -> str:
         "iat": now,
         "exp": now + timedelta(minutes=settings.jwt_access_ttl_minutes),
     }
+    if must_change_password:
+        payload["pwc"] = True  # temporary password: see api/deps.get_current_user
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 

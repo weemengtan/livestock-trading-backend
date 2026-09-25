@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, String
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, String, false
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -28,5 +28,8 @@ class User(TimestampedBase):
 
     mfa_secret: Mapped[str | None] = mapped_column(String, default=None)
     mfa_enrolled: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Set when an admin sets a temporary password; cleared when the user
+    # changes it. While set, the session may only reach change-password.
+    must_change_password: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
 
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)

@@ -18,10 +18,15 @@ class UserResponse(BaseModel):
     org_id: uuid.UUID
     invite_status: InviteStatus
     mfa_enrolled: bool
+    must_change_password: bool = False
     created_at: datetime
     last_login_at: datetime | None
 
     model_config = {"from_attributes": True}
+
+
+class TemporaryPasswordRequest(BaseModel):
+    temporary_password: str
 
 
 class RoleChangeRequest(BaseModel):

@@ -13,6 +13,7 @@ from core.errors import (
     MfaRequired,
     TokenReused,
 )
+from core.permissions import MFA_ROLES
 from core.security import (
     create_access_token,
     decode_token,
@@ -65,7 +66,7 @@ async def authenticate(db: AsyncSession, *, email: str, password: str, totp_code
     role_row = await user_repo.get_role(db, user.id)
     role = role_row.role  # type: ignore[union-attr]
 
-    if settings.mfa_enforcement_enabled and role in (Role.OWNER, Role.ACCOUNTANT):
+    if settings.mfa_enforcement_enabled and role in MFA_ROLES:
         if not user.mfa_enrolled:
             # Enrollment happens right after accept-invite; a user who
             # skipped it can't log in until it's done (§14).
@@ -82,7 +83,9 @@ async def authenticate(db: AsyncSession, *, email: str, password: str, totp_code
 async def issue_token_pair(
     db: AsyncSession, *, user: User, role: Role, device_info: str | None = None
 ) -> tuple[str, str]:
-    access_token = create_access_token(user_id=str(user.id), role=role.value, org_id=str(user.org_id))
+    access_token = create_access_token(
+        user_id=str(user.id), role=role.value, org_id=str(user.org_id), must_change_password=user.must_change_password
+    )
 
     raw_refresh = generate_refresh_token()
     ttl_days = settings.jwt_refresh_ttl_days_buyer if role == Role.BUYER else settings.jwt_refresh_ttl_days
@@ -132,7 +135,9 @@ async def rotate_refresh_token(db: AsyncSession, *, raw_refresh_token: str) -> t
     role_row = await user_repo.get_role(db, user.id)
     role = role_row.role  # type: ignore[union-attr]
 
-    access_token = create_access_token(user_id=str(user.id), role=role.value, org_id=str(user.org_id))
+    access_token = create_access_token(
+        user_id=str(user.id), role=role.value, org_id=str(user.org_id), must_change_password=user.must_change_password
+    )
 
     new_raw_refresh = generate_refresh_token()
     ttl_days = settings.jwt_refresh_ttl_days_buyer if role == Role.BUYER else settings.jwt_refresh_ttl_days

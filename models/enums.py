@@ -16,6 +16,10 @@ class Role(enum.StrEnum):
     OWNER = "OWNER"
     ACCOUNTANT = "ACCOUNTANT"
     BUYER = "BUYER"
+    # Developer/operator super-user: everything an OWNER can do, plus the only
+    # role that may create, change or reset another PLATFORM_ADMIN.
+    # See core/permissions.py for exactly how it relates to OWNER.
+    PLATFORM_ADMIN = "PLATFORM_ADMIN"
 
 
 class InviteStatus(enum.StrEnum):

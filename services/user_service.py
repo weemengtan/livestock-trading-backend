@@ -6,12 +6,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.errors import (
     BreachedPassword,
     Conflict,
+    Forbidden,
     InvalidToken,
     LastOwnerGuard,
+    LastPlatformAdminGuard,
     MfaInvalid,
     NotFound,
     PasswordPolicyViolation,
 )
+from core.permissions import MFA_ROLES, can_assign_roles, can_manage_account, can_set_temporary_password
 from core.security import (
     decode_invite_token,
     generate_totp_secret,
@@ -63,7 +66,7 @@ async def accept_invite(db: AsyncSession, *, invite_token: str, password: str) -
     user.invite_status = InviteStatus.ACTIVE
 
     provisioning_uri = None
-    if role in (Role.OWNER, Role.ACCOUNTANT):
+    if role in MFA_ROLES:
         secret = generate_totp_secret()
         user.mfa_secret = secret
         user.mfa_enrolled = False  # set True once they verify a code, not just receive the secret
@@ -82,7 +85,9 @@ async def confirm_mfa_enrollment(db: AsyncSession, *, user: User, code: str) -> 
     await audit_service.write(db, actor_id=user.id, action="user.mfa_enrolled", entity="user", entity_id=user.id)
 
 
-async def change_role(db: AsyncSession, *, target_user_id: uuid.UUID, new_role: Role, actor_id: uuid.UUID) -> User:
+async def change_role(
+    db: AsyncSession, *, target_user_id: uuid.UUID, new_role: Role, actor_id: uuid.UUID, actor_role: Role
+) -> User:
     user = await user_repo.get_by_id(db, target_user_id)
     if user is None:
         raise NotFound("User")
@@ -91,6 +96,11 @@ async def change_role(db: AsyncSession, *, target_user_id: uuid.UUID, new_role: 
         raise NotFound("User role")
 
     old_role = role_row.role
+    if not can_manage_account(actor_role, old_role) or not can_assign_roles(actor_role, old_role, new_role):
+        raise Forbidden("Only a Platform Admin can create, change or remove a Platform Admin.")
+    if old_role == Role.PLATFORM_ADMIN and new_role != Role.PLATFORM_ADMIN:
+        if await user_repo.count_active_platform_admins(db, excluding_user_id=target_user_id) < 1:
+            raise LastPlatformAdminGuard()
     if old_role == Role.OWNER and new_role != Role.OWNER:
         remaining = await user_repo.count_active_owners(db, excluding_user_id=target_user_id)
         if remaining < 1:
@@ -112,11 +122,18 @@ async def change_role(db: AsyncSession, *, target_user_id: uuid.UUID, new_role: 
     return user
 
 
-async def deactivate(db: AsyncSession, *, target_user_id: uuid.UUID, actor_id: uuid.UUID) -> User:
+async def deactivate(
+    db: AsyncSession, *, target_user_id: uuid.UUID, actor_id: uuid.UUID, actor_role: Role
+) -> User:
     user = await user_repo.get_by_id(db, target_user_id)
     if user is None:
         raise NotFound("User")
     role_row = await user_repo.get_role(db, target_user_id)
+    if role_row is not None and not can_manage_account(actor_role, role_row.role):
+        raise Forbidden("Only a Platform Admin can deactivate a Platform Admin.")
+    if role_row is not None and role_row.role == Role.PLATFORM_ADMIN:
+        if await user_repo.count_active_platform_admins(db, excluding_user_id=target_user_id) < 1:
+            raise LastPlatformAdminGuard()
 
     if role_row is not None and role_row.role == Role.OWNER:
         remaining = await user_repo.count_active_owners(db, excluding_user_id=target_user_id)
@@ -139,10 +156,15 @@ async def deactivate(db: AsyncSession, *, target_user_id: uuid.UUID, actor_id: u
     return user
 
 
-async def reactivate(db: AsyncSession, *, target_user_id: uuid.UUID, actor_id: uuid.UUID) -> User:
+async def reactivate(
+    db: AsyncSession, *, target_user_id: uuid.UUID, actor_id: uuid.UUID, actor_role: Role
+) -> User:
     user = await user_repo.get_by_id(db, target_user_id)
     if user is None:
         raise NotFound("User")
+    role_row = await user_repo.get_role(db, target_user_id)
+    if role_row is not None and not can_manage_account(actor_role, role_row.role):
+        raise Forbidden("Only a Platform Admin can reactivate a Platform Admin.")
     if user.invite_status != InviteStatus.DEACTIVATED:
         raise Conflict("NOT_DEACTIVATED", "User is not currently deactivated.")
 
@@ -157,5 +179,53 @@ async def reactivate(db: AsyncSession, *, target_user_id: uuid.UUID, actor_id: u
         entity_id=target_user_id,
         before={"invite_status": before_status},
         after={"invite_status": InviteStatus.ACTIVE.value},
+    )
+    return user
+
+
+async def set_temporary_password(
+    db: AsyncSession,
+    *,
+    target_user_id: uuid.UUID,
+    temporary_password: str,
+    actor_id: uuid.UUID,
+    actor_role: Role,
+) -> User:
+    """An admin sets a one-off password for a user who cannot sign in (there
+    is no email service to send a reset link). The user is signed out
+    everywhere and must choose their own password at next login: their
+    sessions carry a `pwc` claim until they do (api/deps.get_current_user).
+    The temporary password itself is never stored anywhere but as a hash, and
+    never appears in the audit log."""
+    user = await user_repo.get_by_id(db, target_user_id)
+    if user is None:
+        raise NotFound("User")
+    role_row = await user_repo.get_role(db, target_user_id)
+    if role_row is None:
+        raise NotFound("User role")
+    if target_user_id == actor_id:
+        raise Conflict("USE_CHANGE_PASSWORD", "Change your own password from your profile instead.")
+    if not can_manage_account(actor_role, role_row.role) or not can_set_temporary_password(actor_role, role_row.role):
+        raise Forbidden("You do not have permission to reset this account's password.")
+    if user.invite_status != InviteStatus.ACTIVE:
+        raise Conflict(
+            "USER_NOT_ACTIVE",
+            "Only an active user can be given a temporary password "
+            "(a pending user should use their invite link; a deactivated user must be reactivated first).",
+        )
+
+    await _enforce_password_policy(temporary_password)
+
+    user.password_hash = hash_password(temporary_password)
+    user.must_change_password = True
+    await refresh_token_repo.revoke_all_for_user(db, user_id=user.id, revoked_at=datetime.now(UTC))
+
+    await audit_service.write(
+        db,
+        actor_id=actor_id,
+        action="user.temporary_password_set",
+        entity="user",
+        entity_id=target_user_id,
+        after={"must_change_password": True},
     )
     return user

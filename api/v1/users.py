@@ -6,12 +6,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.deps import CurrentUser, require_role
 from core.db import get_db
-from core.errors import Conflict, NotFound
+from core.errors import Conflict, Forbidden, NotFound
+from core.permissions import can_assign_roles, can_manage_account
 from models.audit_log import AuditLog
 from models.enums import OrgKind, Role
 from repositories import organisations as org_repo
 from repositories import users as user_repo
-from schemas.users import AuditEntryResponse, InviteUserRequest, RoleChangeRequest, UserResponse
+from schemas.users import (
+    AuditEntryResponse,
+    InviteUserRequest,
+    RoleChangeRequest,
+    TemporaryPasswordRequest,
+    UserResponse,
+)
 from services import invite_service, user_service
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -19,6 +26,8 @@ router = APIRouter(prefix="/users", tags=["users"])
 # Every route in this file is OWNER-only per §9.1a/§2.1.2 — Bobby is the
 # only one who manages accounts. This is a deliberate, narrower gate than
 # require_role(OWNER, ACCOUNTANT); do not widen it without re-reading §9.1a.
+# PLATFORM_ADMIN passes it too (core/permissions.role_satisfies), and is the
+# only role that can see or touch another PLATFORM_ADMIN account.
 _owner_only = require_role(Role.OWNER)
 
 
@@ -30,6 +39,7 @@ def _to_response(user, role: Role) -> UserResponse:
         org_id=user.org_id,
         invite_status=user.invite_status,
         mfa_enrolled=user.mfa_enrolled,
+        must_change_password=user.must_change_password,
         created_at=user.created_at,
         last_login_at=user.last_login_at,
     )
@@ -41,6 +51,8 @@ async def invite(
     current: CurrentUser = Depends(_owner_only),
     db: AsyncSession = Depends(get_db),
 ) -> UserResponse:
+    if not can_assign_roles(current.role, body.role):
+        raise Forbidden("Only a Platform Admin can create a Platform Admin.")
     existing = await user_repo.get_by_email(db, body.email)
     if existing is not None:
         raise Conflict("EMAIL_ALREADY_EXISTS", "A user with this email already exists.")
@@ -67,7 +79,8 @@ async def list_all(
     db: AsyncSession = Depends(get_db),
 ) -> list[UserResponse]:
     rows = await user_repo.list_users(db, role=role, is_active=is_active)
-    return [_to_response(user, user_role.role) for user, user_role in rows]
+    visible = [(user, r) for user, r in rows if can_manage_account(current.role, r.role)]
+    return [_to_response(user, r.role) for user, r in visible]
 
 
 @router.get("/{user_id}", response_model=UserResponse)
@@ -78,8 +91,8 @@ async def get_one(
     if user is None:
         raise NotFound("User")
     role_row = await user_repo.get_role(db, user_id)
-    if role_row is None:
-        raise NotFound("User role")
+    if role_row is None or not can_manage_account(current.role, role_row.role):
+        raise NotFound("User")
     return _to_response(user, role_row.role)
 
 
@@ -90,7 +103,9 @@ async def change_role(
     current: CurrentUser = Depends(_owner_only),
     db: AsyncSession = Depends(get_db),
 ) -> UserResponse:
-    user = await user_service.change_role(db, target_user_id=user_id, new_role=body.role, actor_id=current.user_id)
+    user = await user_service.change_role(
+        db, target_user_id=user_id, new_role=body.role, actor_id=current.user_id, actor_role=current.role
+    )
     await db.commit()
     return _to_response(user, body.role)
 
@@ -99,7 +114,9 @@ async def change_role(
 async def deactivate(
     user_id: uuid.UUID, current: CurrentUser = Depends(_owner_only), db: AsyncSession = Depends(get_db)
 ) -> UserResponse:
-    user = await user_service.deactivate(db, target_user_id=user_id, actor_id=current.user_id)
+    user = await user_service.deactivate(
+        db, target_user_id=user_id, actor_id=current.user_id, actor_role=current.role
+    )
     await db.commit()
     role_row = await user_repo.get_role(db, user_id)
     return _to_response(user, role_row.role)  # type: ignore[union-attr]
@@ -109,7 +126,28 @@ async def deactivate(
 async def reactivate(
     user_id: uuid.UUID, current: CurrentUser = Depends(_owner_only), db: AsyncSession = Depends(get_db)
 ) -> UserResponse:
-    user = await user_service.reactivate(db, target_user_id=user_id, actor_id=current.user_id)
+    user = await user_service.reactivate(
+        db, target_user_id=user_id, actor_id=current.user_id, actor_role=current.role
+    )
+    await db.commit()
+    role_row = await user_repo.get_role(db, user_id)
+    return _to_response(user, role_row.role)  # type: ignore[union-attr]
+
+
+@router.post("/{user_id}/temporary-password", response_model=UserResponse)
+async def set_temporary_password(
+    user_id: uuid.UUID,
+    body: TemporaryPasswordRequest,
+    current: CurrentUser = Depends(_owner_only),
+    db: AsyncSession = Depends(get_db),
+) -> UserResponse:
+    user = await user_service.set_temporary_password(
+        db,
+        target_user_id=user_id,
+        temporary_password=body.temporary_password,
+        actor_id=current.user_id,
+        actor_role=current.role,
+    )
     await db.commit()
     role_row = await user_repo.get_role(db, user_id)
     return _to_response(user, role_row.role)  # type: ignore[union-attr]
@@ -119,6 +157,9 @@ async def reactivate(
 async def audit(
     user_id: uuid.UUID, current: CurrentUser = Depends(_owner_only), db: AsyncSession = Depends(get_db)
 ) -> list[AuditEntryResponse]:
+    role_row = await user_repo.get_role(db, user_id)
+    if role_row is not None and not can_manage_account(current.role, role_row.role):
+        raise NotFound("User")
     result = await db.execute(
         select(AuditLog)
         .where(AuditLog.entity == "user", AuditLog.entity_id == user_id)
