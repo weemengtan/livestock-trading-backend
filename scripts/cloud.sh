@@ -25,6 +25,12 @@ case "${1:-}" in
              uv run python -m scripts.seed_reference_data --file "$2" ;;
   wipe)      uv run python -m scripts.wipe_business_data ;;
   market)    uv run python -m scripts.seed_market_intel ;;
-  reset)     uv run python -m scripts.wipe_business_data && uv run python -m scripts.seed_market_intel ;;
+  reset)     # Confirm once here (the wipe script's own prompt returns success on "no", which
+             # would let the market reseed run anyway), then run both steps non-interactively.
+             echo "Target database: ${DATABASE_URL##*@}"
+             printf "Wipe ALL business data + audit log there, then reseed market intel? Type 'yes': "
+             read -r answer
+             [ "$answer" = "yes" ] || { echo "Aborted — nothing was changed."; exit 1; }
+             uv run python -m scripts.wipe_business_data --yes && uv run python -m scripts.seed_market_intel ;;
   *)         sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

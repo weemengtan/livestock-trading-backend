@@ -13,6 +13,9 @@ wheels/
 .env
 .env.railway
 
+# Confidential reference-data bootstrap exports (scripts/export_reference_seed.py)
+*.local.json
+
 # Postgres/Redis local volumes
 .docker-data/
 
