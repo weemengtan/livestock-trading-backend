@@ -147,7 +147,19 @@ def upgrade() -> None:
     # .env.example: "livestock") loses UPDATE/DELETE outright, and a
     # trigger raises as belt-and-braces even if a future migration
     # mistakenly re-grants it. A correction is always a new snapshot.
-    op.execute("REVOKE UPDATE, DELETE ON order_lines FROM livestock")
+    # Guarded: the role exists on the local docker-compose Postgres but not on
+    # a managed one (e.g. Railway), where the trigger below is the enforcement.
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'livestock') THEN
+                REVOKE UPDATE, DELETE ON order_lines FROM livestock;
+            END IF;
+        END
+        $$
+        """
+    )
     op.execute(
         """
         CREATE FUNCTION forbid_order_line_mutation() RETURNS trigger AS $$
