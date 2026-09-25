@@ -9,6 +9,7 @@ Run with: uv run python -m scripts.seed
 """
 
 import asyncio
+import os
 
 from core.db import async_session_factory
 from core.security import generate_totp_secret, hash_password, totp_provisioning_uri
@@ -19,7 +20,9 @@ from models.user_role import UserRole
 from repositories import organisations as org_repo
 from repositories import users as user_repo
 
-DEV_PASSWORD = "ChangeMe123!Dev"  # noqa: S105 — local dev seed only, never used outside this script
+# Override with SEED_PASSWORD when seeding a database reachable from the
+# internet (e.g. the Railway test environment) — the default is public.
+DEV_PASSWORD = os.environ.get("SEED_PASSWORD", "ChangeMe123!Dev")  # noqa: S105
 
 
 async def _get_or_create_org(session, kind: OrgKind, name: str) -> Organisation:

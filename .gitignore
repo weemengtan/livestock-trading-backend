@@ -11,6 +11,7 @@ wheels/
 
 # Local secrets
 .env
+.env.railway
 
 # Postgres/Redis local volumes
 .docker-data/

@@ -1,5 +1,6 @@
 from typing import Literal
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -8,6 +9,18 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+asyncpg://livestock:livestock@localhost:5432/livestock"
     redis_url: str = "redis://localhost:6379/0"
+
+    # Railway (and Heroku-style hosts) hand out `postgresql://` / `postgres://`
+    # URLs; this app's async engine needs the asyncpg driver in the scheme.
+    # Normalised here so the platform's URL can be pasted in unchanged —
+    # for the deployed service and for scripts run against it from a laptop.
+    @field_validator("database_url")
+    @classmethod
+    def _use_asyncpg_driver(cls, v: str) -> str:
+        for prefix in ("postgres://", "postgresql://"):
+            if v.startswith(prefix):
+                return "postgresql+asyncpg://" + v[len(prefix) :]
+        return v
 
     jwt_secret: str = "dev-only-change-me"
     jwt_algorithm: str = "HS256"
@@ -37,6 +50,15 @@ class Settings(BaseSettings):
     # deployment); local dev's .env sets this False so refresh/logout
     # actually work before HTTPS exists anywhere in the stack.
     cookie_secure: bool = True
+
+    # The refresh cookie is SameSite=Strict per §14, which a browser only
+    # sends when the frontend and API are the same *site* (e.g. app.x.com and
+    # api.x.com). On the default vercel.app / up.railway.app hostnames they are
+    # different sites, so Strict cookies are never sent and every page reload
+    # logs the user out. "none" (requires cookie_secure=true) lets that setup
+    # work in Chrome/Firefox/Edge — but Safari/iOS still blocks it. Prefer a
+    # shared custom domain and leave this at "strict".
+    cookie_samesite: Literal["strict", "lax", "none"] = "strict"
 
     disable_breached_password_check: bool = False
 

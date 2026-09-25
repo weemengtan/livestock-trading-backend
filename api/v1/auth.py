@@ -24,15 +24,15 @@ REFRESH_COOKIE_NAME = "refresh_token"
 
 
 def _set_refresh_cookie(response: Response, raw_refresh_token: str) -> None:
-    # httpOnly + Secure + SameSite=Strict per §14. Never exposed in a JSON
-    # body — the cookie is the only place a refresh token ever appears
-    # outside the database (as a hash).
+    # httpOnly + Secure + SameSite=Strict per §14 (SameSite is configurable,
+    # see core/config.py). Never exposed in a JSON body — the cookie is the
+    # only place a refresh token ever appears outside the database (as a hash).
     response.set_cookie(
         key=REFRESH_COOKIE_NAME,
         value=raw_refresh_token,
         httponly=True,
         secure=settings.cookie_secure,
-        samesite="strict",
+        samesite=settings.cookie_samesite,
         path="/api/v1/auth",
     )
 
@@ -90,7 +90,11 @@ async def logout(
     if refresh_token is not None:
         await auth_service.logout(db, raw_refresh_token=refresh_token)
         await db.commit()
-    response.delete_cookie(REFRESH_COOKIE_NAME, path="/api/v1/auth")
+    # Attributes must match _set_refresh_cookie's: a SameSite=None cookie's
+    # deletion is itself ignored by the browser unless it is Secure too.
+    response.delete_cookie(
+        REFRESH_COOKIE_NAME, path="/api/v1/auth", secure=settings.cookie_secure, samesite=settings.cookie_samesite
+    )
 
 
 @router.get("/me", response_model=MeResponse)
