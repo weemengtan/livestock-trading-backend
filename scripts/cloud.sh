@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run the dev-data scripts against the Railway TEST database from your laptop.
 # Reads DATABASE_URL / ENVIRONMENT / SEED_PASSWORD from .env.railway
-# (see .env.railway.example). The scripts' own safeguards still apply: the wipe
+# (see DEPLOY.md §3). The scripts' own safeguards still apply: the wipe
 # refuses unless ENVIRONMENT=dev, prints the target host, and asks for 'yes'.
 #
 #   scripts/cloud.sh migrate         alembic upgrade head (normally automatic on deploy)
@@ -13,7 +13,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-[ -f .env.railway ] || { echo "Missing .env.railway — copy .env.railway.example and fill it in." >&2; exit 1; }
+[ -f .env.railway ] || { echo "Missing .env.railway — create it as described in DEPLOY.md §3 (DATABASE_URL, ENVIRONMENT=dev, SEED_PASSWORD)." >&2; exit 1; }
 set -a; . ./.env.railway; set +a
 [ -n "${DATABASE_URL:-}" ] || { echo "DATABASE_URL is empty in .env.railway." >&2; exit 1; }
 [ -n "${SEED_PASSWORD:-}" ] || unset SEED_PASSWORD

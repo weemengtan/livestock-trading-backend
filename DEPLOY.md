@@ -14,7 +14,13 @@ The refresh cookie is `SameSite=Strict`. A browser only sends it when the fronte
 
 ## 1. Railway (backend)
 
-1. New project → **Deploy from GitHub repo** → `livestock-trading-backend`. `railway.json` supplies build, migrate-on-deploy (`alembic upgrade head`), start command, health check.
+1. New project → **Deploy from GitHub repo** → `livestock-trading-backend`. The repo must be under the **same GitHub account Railway is linked to** (Railway's GitHub app can only see that account's repos).
+   `railway.json` documents the intended deploy settings, but Railway did not apply it in practice. Set these by hand in the service's **Settings → Deploy**:
+   - Custom Start Command: `uvicorn main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips '*'`
+   - Pre-deploy Command: `alembic upgrade head`
+   - Healthcheck Path: `/api/v1/health`
+   
+   A correct deployment shows a **Pre-deploy** stage and, in Deploy Logs, `Uvicorn running on http://0.0.0.0:8080`. A log with only `Starting Container` means the start command was not applied.
 2. Add **PostgreSQL** and **Redis** to the project.
 3. Backend service → Variables:
 
@@ -48,7 +54,12 @@ The scripts run **locally** against the Railway database through its public TCP 
 One-time setup:
 
 1. Postgres service → Variables → copy `DATABASE_PUBLIC_URL`.
-2. `cp .env.railway.example .env.railway` (git-ignored) and fill in `DATABASE_URL`, keep `ENVIRONMENT=dev`, set a `SEED_PASSWORD` (the default demo password is public and this DB is on the internet).
+2. Create `.env.railway` (git-ignored; only `scripts/cloud.sh` reads it) with three lines:
+   ```
+   DATABASE_URL=<Postgres DATABASE_PUBLIC_URL; postgresql:// is converted to asyncpg for you>
+   ENVIRONMENT=dev        # required by wipe_business_data.py; your statement that this DB is disposable test data
+   SEED_PASSWORD=<your own password for bobby/bing/buyer@example.com; the default is public and this DB is on the internet>
+   ```
 3. Bootstrap once:
    ```
    scripts/cloud.sh seed                                  # orgs + bobby/bing/buyer@example.com
