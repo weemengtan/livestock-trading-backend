@@ -182,15 +182,15 @@ def _compute_active_line_workings(
 
     # DNBP is *supposed* to sit below Peter's expected livestock cost — that
     # buffer is what leaves room for margin once the animal is actually
-    # bought. The risk case is the ceiling catching up to or passing cost
-    # (buffer gone), never the ceiling sitting below it (that's the healthy
-    # state, not a loss signal).
-    if diff_vs_peter is not None and diff_vs_peter >= 0:
+    # bought. The risk case is the ceiling passing cost (buffer gone), never
+    # the ceiling sitting below it (that's the healthy state, not a loss
+    # signal). DNBP exactly equal to cost is not flagged — strictly exceeds only.
+    if diff_vs_peter is not None and diff_vs_peter > 0:
         found_issues.append(
             ValidationIssue(
                 codes.MARGIN_BUFFER_ERODED,
                 Severity.WARN,
-                "DNBP has risen to meet or exceed Peter's expected livestock cost — margin buffer eroded",
+                "DNBP exceeds Peter's expected livestock cost — margin buffer eroded",
             )
         )
 

@@ -40,9 +40,9 @@ RECEIVED_BENCHMARK_ABSENT = "RECEIVED_BENCHMARK_ABSENT"
 
 # WARN — supporting analysis degraded, or a commercial red flag.
 NO_STANDARD_WEIGHT = "NO_STANDARD_WEIGHT"
-# Fires when DNBP has risen to meet or exceed Peter's expected livestock
-# cost — i.e. the ceiling no longer sits below cost, so the margin buffer
-# it's supposed to protect is gone. Previously named DNBP_BELOW_COST and
+# Fires when DNBP strictly exceeds Peter's expected livestock cost
+# (DNBP == cost does not fire) — i.e. the ceiling has passed cost, so the
+# margin buffer it's supposed to protect is gone. Previously named DNBP_BELOW_COST and
 # fired on the opposite condition (DNBP < cost); that was backwards — DNBP
 # below cost is the healthy, intended state (buying under cost raises
 # margin), not a loss signal. Renamed and inverted to match.
