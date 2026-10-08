@@ -73,6 +73,9 @@ async def upsert(
     acknowledged_by: uuid.UUID,
     acknowledged_at: datetime,
     snapshot_id: uuid.UUID,
+    reason_code: str | None = None,
+    remark: str | None = None,
+    dnbp_model_id: uuid.UUID | None = None,
 ) -> OrderIssueAcknowledgment:
     existing = await get_for_identity(
         db,
@@ -97,6 +100,9 @@ async def upsert(
             acknowledged_by=acknowledged_by,
             acknowledged_at=acknowledged_at,
             last_confirmed_snapshot_id=snapshot_id,
+            reason_code=reason_code,
+            remark=remark,
+            dnbp_model_id=dnbp_model_id,
         )
         db.add(row)
     else:
@@ -105,6 +111,9 @@ async def upsert(
         row.acknowledged_by = acknowledged_by
         row.acknowledged_at = acknowledged_at
         row.last_confirmed_snapshot_id = snapshot_id
+        row.reason_code = reason_code
+        row.remark = remark
+        row.dnbp_model_id = dnbp_model_id
     await db.flush()
     return row
 

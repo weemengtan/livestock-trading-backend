@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, String
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -40,3 +40,22 @@ class ValidationIssueRecord(TimestampedBase):
     # pattern as dnbp_publication_deliveries/buy_instruction_line_fills. See
     # models/order_issue_acknowledgment.py's docstring for the full reasoning.
     carried_forward: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # Two-tier review (domain/issue_review.py). `acknowledged_*` above is the
+    # OWNER's final approval; these carry why, and the ACCOUNTANT's
+    # recommendation / the OWNER's rejection. Full history lives in audit_log
+    # — these are only the current state, so a recalculation (which replaces
+    # the issue rows) starts the review afresh.
+    approval_reason_code: Mapped[str | None] = mapped_column(String, default=None)
+    approval_remark: Mapped[str | None] = mapped_column(Text, default=None)
+    approval_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+    recommendation_decision: Mapped[str | None] = mapped_column(String, default=None)
+    recommendation_reason_code: Mapped[str | None] = mapped_column(String, default=None)
+    recommendation_remark: Mapped[str | None] = mapped_column(Text, default=None)
+    recommended_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), default=None)
+    recommended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+    rejected_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), default=None)
+    rejected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    rejection_remark: Mapped[str | None] = mapped_column(Text, default=None)

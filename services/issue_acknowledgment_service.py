@@ -20,6 +20,7 @@ from datetime import UTC, datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from domain.ingestion.diff import line_content_fingerprint
+from domain.issue_review import is_approval_current
 from models.order_issue_acknowledgment import OrderIssueAcknowledgment
 from models.order_line import OrderLine
 from repositories import order_issue_acknowledgments as acks_repo
@@ -31,11 +32,19 @@ def _identity(order_line: OrderLine) -> tuple[str | None, str | None, str | None
 
 
 async def find_matching(
-    db: AsyncSession, order_line: OrderLine, *, org_id: uuid.UUID, code: str, column_ref: str | None
+    db: AsyncSession,
+    order_line: OrderLine,
+    *,
+    org_id: uuid.UUID,
+    code: str,
+    column_ref: str | None,
+    current_model_id: uuid.UUID | None = None,
 ) -> OrderIssueAcknowledgment | None:
-    """None if never acknowledged, or if acknowledged against a fingerprint
-    that no longer matches this line's current content (i.e. the order
-    changed since — a fresh review is required, not a carry-forward)."""
+    """None if never acknowledged, if acknowledged against a fingerprint
+    that no longer matches this line's current content (the order changed),
+    or if the approval has lapsed — past its validity window or given under a
+    different DNBP model than `current_model_id`. Each means a fresh review
+    is required, not a carry-forward."""
     contract_no, species, product_type, incoterm = _identity(order_line)
     ack = await acks_repo.get_for_identity(
         db,
@@ -48,6 +57,8 @@ async def find_matching(
         column_ref=column_ref,
     )
     if ack is None or ack.fingerprint != line_content_fingerprint(order_line):
+        return None
+    if not is_approval_current(ack.acknowledged_at, ack.dnbp_model_id, current_model_id, datetime.now(UTC)):
         return None
     return ack
 
@@ -65,6 +76,9 @@ async def record(
     column_ref: str | None,
     acknowledged_by: uuid.UUID,
     snapshot_id: uuid.UUID,
+    reason_code: str | None = None,
+    remark: str | None = None,
+    dnbp_model_id: uuid.UUID | None = None,
 ) -> OrderIssueAcknowledgment:
     contract_no, species, product_type, incoterm = _identity(order_line)
     return await acks_repo.upsert(
@@ -80,4 +94,7 @@ async def record(
         acknowledged_by=acknowledged_by,
         acknowledged_at=datetime.now(UTC),
         snapshot_id=snapshot_id,
+        reason_code=reason_code,
+        remark=remark,
+        dnbp_model_id=dnbp_model_id,
     )

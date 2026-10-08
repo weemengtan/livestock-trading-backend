@@ -1,37 +1,41 @@
 import uuid
-from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, Query, UploadFile
 from redis.asyncio import Redis
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.deps import CurrentUser, redis_dep, require_role
 from core.db import get_db
-from core.errors import Conflict, NotFound, SnapshotFrozen
-from domain.engine.issues import Severity
+from core.errors import NotFound, SnapshotFrozen
+from domain.issue_review import ReviewDecision
+from models.audit_log import AuditLog
 from models.enums import Role, SnapshotStatus
 from repositories import order_lines as order_lines_repo
 from repositories import order_snapshots as order_snapshots_repo
 from repositories import order_workings as order_workings_repo
+from repositories import users as users_repo
 from repositories import validation_issues as validation_issues_repo
 from schemas.dnbp_models import ModelStampResponse, SnapshotModelStatusResponse
 from schemas.order_lines import OrderLineResponse, OrderWorkingsResponse
 from schemas.snapshots import (
-    AcknowledgeIssuesRequest,
     CalculateResponse,
     CommitSnapshotRequest,
     IngestionContractResponse,
+    IssueRecommendation,
+    IssueRejection,
     IssueResponse,
+    ReviewAuditEntryResponse,
+    ReviewIssuesRequest,
     SnapshotResponse,
     UploadPreviewResponse,
 )
 from services import (
-    audit_service,
     calculate_service,
     dnbp_model_service,
     ingestion_service,
-    issue_acknowledgment_service,
+    issue_review_service,
 )
 from services.ingestion_contract_service import get_active_contract
 
@@ -208,69 +212,77 @@ async def model_status(
     )
 
 
+def _to_issue_response(issue, emails: dict[uuid.UUID, str]) -> IssueResponse:
+    recommendation = None
+    if issue.recommended_by is not None and issue.recommendation_decision is not None:
+        recommendation = IssueRecommendation(
+            decision=issue.recommendation_decision,
+            reason_code=issue.recommendation_reason_code,
+            remark=issue.recommendation_remark,
+            by=issue.recommended_by,
+            by_email=emails.get(issue.recommended_by),
+            at=issue.recommended_at,
+        )
+    rejection = None
+    if issue.rejected_by is not None:
+        rejection = IssueRejection(
+            remark=issue.rejection_remark,
+            by=issue.rejected_by,
+            by_email=emails.get(issue.rejected_by),
+            at=issue.rejected_at,
+        )
+    return IssueResponse(
+        id=issue.id,
+        order_line_id=issue.order_line_id,
+        code=issue.code,
+        severity=issue.severity.value,
+        message=issue.message,
+        column_ref=issue.column_ref,
+        acknowledged_by=issue.acknowledged_by,
+        acknowledged_by_email=emails.get(issue.acknowledged_by) if issue.acknowledged_by else None,
+        acknowledged_at=issue.acknowledged_at,
+        carried_forward=issue.carried_forward,
+        approval_reason_code=issue.approval_reason_code,
+        approval_remark=issue.approval_remark,
+        approval_expires_at=issue.approval_expires_at,
+        recommendation=recommendation,
+        rejection=rejection,
+    )
+
+
+async def _issue_responses(db: AsyncSession, issues) -> list[IssueResponse]:
+    user_ids = {
+        user_id
+        for issue in issues
+        for user_id in (issue.acknowledged_by, issue.recommended_by, issue.rejected_by)
+        if user_id is not None
+    }
+    emails = await users_repo.emails_by_id(db, user_ids)
+    return [_to_issue_response(issue, emails) for issue in issues]
+
+
 @router.get("/{snapshot_id}/issues", response_model=list[IssueResponse])
 async def list_issues(
     snapshot_id: uuid.UUID, current: CurrentUser = Depends(_trading_console), db: AsyncSession = Depends(get_db)
 ) -> list[IssueResponse]:
     await _get_owned_snapshot(db, snapshot_id, current.org_id)
-    issues = await validation_issues_repo.list_by_snapshot(db, snapshot_id)
-    return [IssueResponse.model_validate(i) for i in issues]
+    return await _issue_responses(db, await validation_issues_repo.list_by_snapshot(db, snapshot_id))
 
 
-async def _acknowledge(
-    db: AsyncSession, issue, order_line, *, current: CurrentUser, snapshot_id: uuid.UUID
-) -> None:
-    """Stamps one issue acknowledged and records the durable, identity-keyed
-    decision plus its audit entry. Caller owns validation and the commit."""
-    issue.acknowledged_by = current.user_id
-    issue.acknowledged_at = datetime.now(UTC)
-
-    # Durable, identity-keyed record of this decision — carried forward onto
-    # tomorrow's snapshot for this same order by calculate_service, as long
-    # as the line's content hasn't changed (services/
-    # issue_acknowledgment_service.py). This row, not the one above, is what
-    # stops the daily re-acknowledge-the-same-order design flaw.
-    await issue_acknowledgment_service.record(
-        db,
-        order_line,
-        org_id=current.org_id,
-        code=issue.code,
-        column_ref=issue.column_ref,
-        acknowledged_by=current.user_id,
-        snapshot_id=snapshot_id,
-    )
-
-    await audit_service.write(
-        db,
-        actor_id=current.user_id,
-        action="issue.acknowledged",
-        entity="validation_issue",
-        entity_id=issue.id,
-        after={"code": issue.code, "severity": issue.severity.value},
-    )
-
-
-def _reject_block(issue) -> None:
-    if issue.severity is Severity.BLOCK:
-        raise Conflict(
-            "CANNOT_ACKNOWLEDGE_BLOCK",
-            "A BLOCK issue cannot be acknowledged away — it can only be resolved by a corrected submission.",
-        )
-
-
-@router.post("/{snapshot_id}/issues/acknowledge", response_model=list[IssueResponse])
-async def acknowledge_issues(
+@router.post("/{snapshot_id}/issues/review", response_model=list[IssueResponse])
+async def review_issues(
     snapshot_id: uuid.UUID,
-    body: AcknowledgeIssuesRequest,
+    body: ReviewIssuesRequest,
     current: CurrentUser = Depends(_trading_console),
     db: AsyncSession = Depends(get_db),
 ) -> list[IssueResponse]:
-    """Bulk form of acknowledge_issue below, for the workbench's "Acknowledge
-    selected" — one request and one transaction instead of one per issue,
-    which a full snapshot (hundreds of issues) would otherwise fan out past
-    the general API rate limit. All-or-nothing: every id is validated before
-    any is stamped, so a bad id or a BLOCK issue rejects the whole batch."""
-    await _get_owned_snapshot(db, snapshot_id, current.org_id)
+    """§5.7's publication gate, as a two-tier review. An ACCOUNTANT's decision
+    is a recommendation; an OWNER's is final, and only an OWNER approval
+    acknowledges the warning so a publication can proceed (see
+    services/issue_review_service.py). One request and one transaction for the
+    whole selection — a full snapshot can carry hundreds of issues, and one
+    call each would blow past the general API rate limit. All-or-nothing."""
+    snapshot = await _get_owned_snapshot(db, snapshot_id, current.org_id)
     issue_ids = list(dict.fromkeys(body.issue_ids))
     issues = await validation_issues_repo.list_by_ids(db, issue_ids)
     if len(issues) != len(issue_ids):
@@ -280,36 +292,53 @@ async def acknowledge_issues(
         line = lines.get(issue.order_line_id)
         if line is None or line.snapshot_id != snapshot_id:
             raise NotFound("Issue")
-        _reject_block(issue)
 
-    for issue in issues:
-        await _acknowledge(db, issue, lines[issue.order_line_id], current=current, snapshot_id=snapshot_id)
+    await issue_review_service.review(
+        db,
+        snapshot=snapshot,
+        issues=issues,
+        lines=lines,
+        actor_id=current.user_id,
+        actor_role=current.role,
+        decision=ReviewDecision(body.decision),
+        reason_code=body.reason_code,
+        remark=body.remark,
+    )
     await db.commit()
-    return [IssueResponse.model_validate(i) for i in issues]
+    return await _issue_responses(db, issues)
 
 
-@router.post("/{snapshot_id}/issues/{issue_id}/acknowledge", response_model=IssueResponse)
-async def acknowledge_issue(
-    snapshot_id: uuid.UUID,
-    issue_id: uuid.UUID,
-    current: CurrentUser = Depends(_trading_console),
-    db: AsyncSession = Depends(get_db),
-) -> IssueResponse:
-    """§5.7's publication gate, the other half of it: a WARN/CORRECTION
-    issue on an active line must be explicitly acknowledged, with the
-    acknowledger's id and a timestamp, before a publication can proceed
-    (services/publication_service.py enforces this). Deferred from Phase 2
-    by design — tied to publication, which didn't exist yet (§18)."""
+@router.get("/{snapshot_id}/review-audit", response_model=list[ReviewAuditEntryResponse])
+async def review_audit(
+    snapshot_id: uuid.UUID, current: CurrentUser = Depends(_trading_console), db: AsyncSession = Depends(get_db)
+) -> list[ReviewAuditEntryResponse]:
+    """Every recommendation, approval and rejection made on this snapshot's
+    warnings, newest first — read straight from the tamper-evident audit_log."""
     await _get_owned_snapshot(db, snapshot_id, current.org_id)
-    issue = await validation_issues_repo.get_by_id(db, issue_id)
-    if issue is None:
-        raise NotFound("Issue")
-    order_line = await order_lines_repo.get_by_id(db, issue.order_line_id)
-    if order_line is None or order_line.snapshot_id != snapshot_id:
-        raise NotFound("Issue")
-    _reject_block(issue)
-
-    await _acknowledge(db, issue, order_line, current=current, snapshot_id=snapshot_id)
-    await db.commit()
-    return IssueResponse.model_validate(issue)
+    entries = (
+        (
+            await db.execute(
+                select(AuditLog)
+                .where(
+                    AuditLog.entity == "order_snapshot",
+                    AuditLog.entity_id == snapshot_id,
+                    AuditLog.action.like("issue_review.%"),
+                )
+                .order_by(AuditLog.seq.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    emails = await users_repo.emails_by_id(db, {e.actor_id for e in entries if e.actor_id is not None})
+    return [
+        ReviewAuditEntryResponse(
+            id=e.id,
+            action=e.action,
+            at=e.at,
+            actor_email=emails.get(e.actor_id) if e.actor_id is not None else None,
+            after=e.after,
+        )
+        for e in entries
+    ]
 

@@ -76,3 +76,10 @@ async def create_pending_user(
     await db.flush()
     db.add(UserRole(user_id=user.id, role=role, assigned_by=invited_by))
     return user
+
+
+async def emails_by_id(db: AsyncSession, user_ids: set[uuid.UUID]) -> dict[uuid.UUID, str]:
+    if not user_ids:
+        return {}
+    result = await db.execute(select(User.id, User.email).where(User.id.in_(user_ids)))
+    return {user_id: email for user_id, email in result.all()}

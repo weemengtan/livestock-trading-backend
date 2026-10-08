@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -61,11 +61,33 @@ class CalculateResponse(BaseModel):
     correction_requests_auto_resolved: int
 
 
-MAX_ACKNOWLEDGE_BATCH = 1000
+MAX_REVIEW_BATCH = 1000
 
 
-class AcknowledgeIssuesRequest(BaseModel):
-    issue_ids: list[uuid.UUID] = Field(min_length=1, max_length=MAX_ACKNOWLEDGE_BATCH)
+class ReviewIssuesRequest(BaseModel):
+    """One decision applied to a batch of issues. The caller's role — not this
+    body — decides whether it is a recommendation or the final call."""
+
+    issue_ids: list[uuid.UUID] = Field(min_length=1, max_length=MAX_REVIEW_BATCH)
+    decision: Literal["APPROVE", "REJECT"]
+    reason_code: str | None = None
+    remark: str = Field(max_length=1000)
+
+
+class IssueRecommendation(BaseModel):
+    decision: str
+    reason_code: str | None
+    remark: str | None
+    by: uuid.UUID
+    by_email: str | None
+    at: datetime
+
+
+class IssueRejection(BaseModel):
+    remark: str | None
+    by: uuid.UUID
+    by_email: str | None
+    at: datetime
 
 
 class IssueResponse(BaseModel):
@@ -76,7 +98,23 @@ class IssueResponse(BaseModel):
     message: str
     column_ref: str | None
     acknowledged_by: uuid.UUID | None
+    acknowledged_by_email: str | None = None
     acknowledged_at: datetime | None
     carried_forward: bool
+    approval_reason_code: str | None = None
+    approval_remark: str | None = None
+    approval_expires_at: datetime | None = None
+    recommendation: IssueRecommendation | None = None
+    rejection: IssueRejection | None = None
 
-    model_config = {"from_attributes": True}
+
+class ReviewAuditEntryResponse(BaseModel):
+    """One audit_log row of the snapshot's issue-review trail. `actor_email`
+    is resolved server-side so an ACCOUNTANT can read it without the
+    OWNER-only users endpoint."""
+
+    id: uuid.UUID
+    action: str
+    at: datetime
+    actor_email: str | None
+    after: dict | None

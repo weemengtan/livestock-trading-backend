@@ -21,6 +21,7 @@ from domain.engine import crosscheck
 from domain.engine import issues as codes
 from domain.engine.issues import Severity, ValidationIssue, check_dnbp_outlier
 from domain.engine.workings import OrderLineInput, compute_order_workings
+from domain.issue_review import approval_expires_at
 from models.enums import CorrectionStatus
 from models.order_line import OrderLine
 from models.order_snapshot import OrderSnapshot
@@ -198,12 +199,20 @@ async def calculate_snapshot(db: AsyncSession, snapshot: OrderSnapshot, *, actor
             # BLOCK issues are never acknowledgeable so never looked up.
             if issue.severity in (Severity.WARN, Severity.CORRECTION):
                 prior_ack = await issue_acknowledgment_service.find_matching(
-                    db, order_line, org_id=snapshot.org_id, code=issue.code, column_ref=issue.column_ref
+                    db,
+                    order_line,
+                    org_id=snapshot.org_id,
+                    code=issue.code,
+                    column_ref=issue.column_ref,
+                    current_model_id=uuid.UUID(config.version_id) if config.version_id else None,
                 )
                 if prior_ack is not None:
                     model.acknowledged_by = prior_ack.acknowledged_by
                     model.acknowledged_at = prior_ack.acknowledged_at
                     model.carried_forward = True
+                    model.approval_reason_code = prior_ack.reason_code
+                    model.approval_remark = prior_ack.remark
+                    model.approval_expires_at = approval_expires_at(prior_ack.acknowledged_at)
                     await issue_acknowledgment_service.confirm_still_valid(db, prior_ack, snapshot_id=snapshot.id)
             issue_models.append(model)
         await validation_issues_repo.replace_for_line(db, order_line.id, issue_models)

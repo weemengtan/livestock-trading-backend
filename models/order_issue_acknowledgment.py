@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -73,3 +73,10 @@ class OrderIssueAcknowledgment(TimestampedBase):
     last_confirmed_snapshot_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("order_snapshots.id"), default=None
     )
+
+    # Why it was approved, and under which DNBP model — so a carried-forward
+    # approval can show its original reason, and lapse if the model changes
+    # (domain/issue_review.is_approval_current).
+    reason_code: Mapped[str | None] = mapped_column(String, default=None)
+    remark: Mapped[str | None] = mapped_column(Text, default=None)
+    dnbp_model_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), default=None)
